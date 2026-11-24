@@ -234,7 +234,6 @@
     hasBrand: false,
     hasStore: false,
     sort: { key: 'b', dir: -1 },
-    storeLimit: 300,
     charts: {},
     view: 'datos',
   };
@@ -504,9 +503,7 @@
     }
     const mset = new Set(months);
     const recs = base.filter((r) => (r.y === yearA || r.y === yearB) && mset.has(r.m));
-    const thrAnnual = Math.max(0, +$('#fThreshold').value || 0);
-    const threshold = thrAnnual * months.length / 12;
-    return { yearA, yearB, chain, brand, period, months, recs, thrAnnual, threshold };
+    return { yearA, yearB, chain, brand, period, months, recs };
   }
 
   function periodText(F) {
@@ -514,7 +511,6 @@
     let t = `Comparando <b>${span} ${F.yearB}</b> contra <b>${span} ${F.yearA}</b>`;
     if (F.chain) t += ` · Cadena: <b>${esc(F.chain)}</b>`;
     if (F.brand) t += ` · Marca: <b>${esc(F.brand)}</b>`;
-    if (F.thrAnnual) t += F.months.length === 12 ? ` · Umbral: <b>${money(F.threshold)}</b>` : ` · Umbral proporcional a ${F.months.length} meses: <b>${money(F.threshold)}</b>`;
     if (F.yearA === F.yearB) t += ' · <span class="down">Elige dos años distintos</span>';
     return t;
   }
@@ -549,7 +545,7 @@
     }
     const stores = [...byStore.values()].map((s) => {
       const st = statusOf(s.a, s.b);
-      return { ...s, d: s.b - s.a, p: s.a > 0 ? (s.b - s.a) / s.a : null, st, below: F.threshold > 0 && s.b < F.threshold };
+      return { ...s, d: s.b - s.a, p: s.a > 0 ? (s.b - s.a) / s.a : null, st };
     });
     const chains = [...byChain.values()].map((c) => {
       const ss = stores.filter((s) => s.cadena === c.cadena);
@@ -558,7 +554,6 @@
         nA: ss.filter((s) => s.a > 0).length, nB: ss.filter((s) => s.b > 0).length,
         up: ss.filter((s) => s.st === 'crece' || s.st === 'nueva').length,
         down: ss.filter((s) => s.st === 'cae' || s.st === 'perdida').length,
-        below: ss.filter((s) => s.below).length,
       };
     }).sort((x, y) => y.b - x.b || y.a - x.a);
     const count = (st) => stores.filter((s) => s.st === st).length;
@@ -568,7 +563,6 @@
       chains, stores,
       nA: stores.filter((s) => s.a > 0).length, nB: stores.filter((s) => s.b > 0).length,
       crece: count('crece'), cae: count('cae'), nueva: count('nueva'), perdida: count('perdida'),
-      below: stores.filter((s) => s.below && (s.a > 0 || s.b > 0)).length,
     };
   }
 
@@ -609,7 +603,6 @@
       kpi('Variación %', arrow + pct(R.p), R.A > 0 ? 'sobre el año base' : 'sin venta en el año base', dir),
       kpi('Tiendas que crecen', num(R.crece + R.nueva), `${num(R.nueva)} nuevas`, 'up'),
       kpi('Tiendas que caen', num(R.cae + R.perdida), `${num(R.perdida)} sin venta en ${F.yearB}`, 'down'),
-      F.threshold ? kpi('Bajo umbral', num(R.below), `venta ${F.yearB} < ${money(F.threshold)}`) : '',
     ].join('');
   }
 
@@ -656,7 +649,7 @@
     if (state.charts.m) { state.charts.m.data = mData; state.charts.m.options = mOpts; state.charts.m.update(); }
     else state.charts.m = new Chart($('#chartMonthly'), { type: 'bar', data: mData, options: mOpts });
 
-    const top = R.chains.filter((c) => c.a > 0).slice(0, 15);
+    const top = R.chains.filter((c) => c.a > 0);
     const good = cssVar('--good'), bad = cssVar('--bad');
     const cData = {
       labels: top.map((c) => (c.cadena.length > 22 ? c.cadena.slice(0, 21) + '…' : c.cadena)),
@@ -684,10 +677,10 @@
 
   // Datos tabulares (se reutilizan para copiar y exportar)
   function chainAOA(F, R) {
-    const head = ['Cadena', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %', `Tiendas ${F.yearA}`, `Tiendas ${F.yearB}`, 'Crecen', 'Caen', 'Bajo umbral', `Part. ${F.yearB}`];
-    const rows = R.chains.map((c) => [c.cadena, c.a, c.b, c.d, c.p, c.nA, c.nB, c.up, c.down, c.below, R.B ? c.b / R.B : null]);
-    const tot = ['Total', R.A, R.B, R.d, R.p, R.nA, R.nB, R.crece + R.nueva, R.cae + R.perdida, R.below, R.B ? 1 : null];
-    return { head, rows, tot, types: ['t', '$', '$', '$', '%', 'n', 'n', 'n', 'n', 'n', 'p'] };
+    const head = ['Cadena', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %', `Tiendas ${F.yearA}`, `Tiendas ${F.yearB}`, 'Crecen', 'Caen', `Part. ${F.yearB}`];
+    const rows = R.chains.map((c) => [c.cadena, c.a, c.b, c.d, c.p, c.nA, c.nB, c.up, c.down, R.B ? c.b / R.B : null]);
+    const tot = ['Total', R.A, R.B, R.d, R.p, R.nA, R.nB, R.crece + R.nueva, R.cae + R.perdida, R.B ? 1 : null];
+    return { head, rows, tot, types: ['t', '$', '$', '$', '%', 'n', 'n', 'n', 'n', 'p'] };
   }
   function monthAOA(F, R) {
     const head = ['Mes', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %'];
@@ -700,8 +693,7 @@
     const st = $('#fStatus').value;
     let rows = R.stores.filter((s) => (s.a || s.b));
     if (q) rows = rows.filter((s) => norm(s.tienda).includes(q) || norm(s.cadena).includes(q));
-    if (st === 'bajo') rows = rows.filter((s) => s.below);
-    else if (st) rows = rows.filter((s) => s.st === st);
+    if (st) rows = rows.filter((s) => s.st === st);
     const { key, dir } = state.sort;
     rows.sort((x, y) => {
       let a = x[key], b = y[key];
@@ -717,7 +709,7 @@
     const head = ['Cadena', 'Tienda', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %', 'Estado', ...(withMonths ? F.months.map((m) => `${MESES[m - 1]} ${F.yearB}`) : [])];
     const keys = ['cadena', 'tienda', 'a', 'b', 'd', 'p', 'st', ...(withMonths ? F.months.map((m) => 'm' + m) : [])];
     const types = ['t', 't', '$', '$', '$', '%', 't', ...(withMonths ? F.months.map(() => '$') : [])];
-    const data = rows.map((s) => [s.cadena, s.tienda, s.a, s.b, s.d, s.p, STATUS_LABEL[s.st].replace(/^\S+\s/, '') + (s.below ? ' · bajo umbral' : ''), ...(withMonths ? F.months.map((m) => s.mb[m] || 0) : [])]);
+    const data = rows.map((s) => [s.cadena, s.tienda, s.a, s.b, s.d, s.p, STATUS_LABEL[s.st].replace(/^\S+\s/, ''), ...(withMonths ? F.months.map((m) => s.mb[m] || 0) : [])]);
     const sum = (i) => rows.reduce((t, s) => t + (s[i] || 0), 0);
     const A = sum('a'), B = sum('b');
     const tot = ['Total', `${num(rows.length)} tiendas`, A, B, B - A, A > 0 ? (B - A) / A : null, '', ...(withMonths ? F.months.map((m) => rows.reduce((t, s) => t + (s.mb[m] || 0), 0)) : [])];
@@ -746,21 +738,20 @@
     const T = storeAOA();
     const { key, dir } = state.sort;
     const th = T.head.map((h, i) => `<th class="${T.types[i] === 't' ? '' : 'num'}" data-sort="${T.keys[i]}">${esc(h)}${T.keys[i] === key ? `<span class="arrow">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('');
-    const shown = T.raw.slice(0, state.storeLimit);
+    const shown = T.raw;
     const body = shown.map((s, ri) => {
       const r = T.rows[ri];
       return `<tr>${r.map((v, i) => {
         const k = T.keys[i];
-        if (k === 'st') return `<td><span class="pill ${s.st}">${STATUS_LABEL[s.st]}</span>${s.below ? ' <span class="pill igual" title="Venta bajo el umbral del período">Bajo umbral</span>' : ''}</td>`;
+        if (k === 'st') return `<td><span class="pill ${s.st}">${STATUS_LABEL[s.st]}</span></td>`;
         if (T.types[i] === 't') return `<td>${esc(v)}</td>`;
-        const cls = (k === 'd' || k === 'p') ? dirCls(s.d) : k === 'b' && s.below ? 'below' : '';
+        const cls = (k === 'd' || k === 'p') ? dirCls(s.d) : '';
         return tdNum(cell(v, T.types[i]), cls);
       }).join('')}</tr>`;
     }).join('');
     const foot = `<tr>${T.tot.map((v, i) => (T.types[i] === 't' ? `<td>${esc(v)}</td>` : tdNum(cell(v, T.types[i]), (T.keys[i] === 'd' || T.keys[i] === 'p') ? dirCls(T.tot[4]) : ''))).join('')}</tr>`;
     $('#tblStores').innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body || `<tr><td colspan="${T.head.length}" class="muted">Sin tiendas para estos filtros.</td></tr>`}</tbody><tfoot>${foot}</tfoot>`;
-    $('#storeCount').textContent = T.raw.length > shown.length ? `· mostrando ${num(shown.length)} de ${num(T.raw.length)}` : `· ${num(T.raw.length)}`;
-    $('#moreWrap').hidden = T.raw.length <= shown.length;
+    $('#storeCount').textContent = `· ${num(T.raw.length)}`;
   }
 
   // ---------------------------------------------------------------- copiar / exportar
@@ -805,7 +796,6 @@
       ['Venta (S/)', R.A, R.B, R.d, R.p],
       ['Tiendas con venta', R.nA, R.nB, R.nB - R.nA, R.nA ? (R.nB - R.nA) / R.nA : null],
       [], ['Tiendas que crecen', R.crece], ['Tiendas que caen', R.cae], ['Tiendas nuevas', R.nueva], [`Sin venta en ${F.yearB}`, R.perdida],
-      ...(F.threshold ? [['Bajo umbral (' + Math.round(F.threshold) + ')', R.below]] : []),
     ];
     const ws0 = XLSX.utils.aoa_to_sheet(k);
     ['B5', 'C5', 'D5'].forEach((a) => ws0[a] && (ws0[a].z = '#,##0.00'));
@@ -829,7 +819,6 @@
 
   function init() {
     if (!window.XLSX) { document.body.innerHTML = '<p style="padding:40px">No se pudo cargar el lector de Excel. Revisa tu conexión y recarga la página.</p>'; return; }
-    $('#fThreshold').value = store.get('threshold', 30000);
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
     $('#btnGoCompare').addEventListener('click', () => setView('comparativo'));
     ['#fileInput', '#fileInputTop'].forEach((s) => $(s).addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); if (s === '#fileInputTop') setView('datos'); }));
@@ -848,11 +837,10 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
-    ['#fYearA', '#fYearB', '#fPeriod', '#fMonthFrom', '#fMonthTo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', () => { state.storeLimit = 300; renderAll(); }));
-    $('#fThreshold').addEventListener('input', () => { store.set('threshold', +$('#fThreshold').value || 0); renderAll(); });
+    ['#fYearA', '#fYearB', '#fPeriod', '#fMonthFrom', '#fMonthTo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', () => { renderAll(); }));
     let tSearch;
-    $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(() => { state.storeLimit = 300; renderStoreTable(); }, 150); });
-    ['#fStatus', '#fMonthCols'].forEach((s) => $(s).addEventListener('change', () => { state.storeLimit = 300; renderStoreTable(); }));
+    $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(() => { renderStoreTable(); }, 150); });
+    ['#fStatus', '#fMonthCols'].forEach((s) => $(s).addEventListener('change', () => { renderStoreTable(); }));
     $('#tblStores').addEventListener('click', (e) => {
       const th = e.target.closest('th[data-sort]');
       if (!th) return;
@@ -860,7 +848,6 @@
       state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['cadena', 'tienda', 'st'].includes(k) ? 1 : -1 };
       renderStoreTable();
     });
-    $('#btnMore').addEventListener('click', () => { state.storeLimit += 500; renderStoreTable(); });
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
     renderFiles();

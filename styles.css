@@ -167,10 +167,7 @@ select, input[type="number"], input[type="search"] {
 .pill.nueva { background: #e8eef7; color: #24446b; }
 .pill.perdida { background: #eceff3; color: #4c5361; }
 .pill.igual { background: #eceff3; color: #4c5361; }
-td.below { background: var(--warn-bg); }
 .count { font-weight: 400; color: var(--muted); font-size: 13px; }
-.more { text-align: center; margin-top: 12px; }
-.more[hidden] { display: none; }
 
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);

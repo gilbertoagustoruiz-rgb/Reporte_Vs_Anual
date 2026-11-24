@@ -1,6 +1,6 @@
 # Reporte Vs Anual
 
-App web para comparar ventas **año contra año** a partir de archivos de Excel o CSV. Es de la misma línea que *Reporte 30K Paraíso*: subes tus archivos, la app detecta las columnas sola y te da el comparativo por cadena, mes y tienda.
+App web para comparar ventas **año contra año** a partir de archivos de Excel o CSV. Parte de la idea de *Reporte 30K Paraíso*, pero muestra el informe completo, sin filtrar por el umbral de 30K: subes tus archivos, la app detecta las columnas sola y te da el comparativo por cadena, mes y tienda.
 
 ## Qué hace
 
@@ -16,9 +16,9 @@ App web para comparar ventas **año contra año** a partir de archivos de Excel 
 - Eliges el **año base** y el **año a comparar**.
 - **Período**: *Mismos meses (YTD)*, que es la opción por defecto y compara solo los meses que ya tienen venta en el año actual; *Año completo*; o un *Rango de meses*.
 - Filtros por **cadena** y **marca**.
-- **Umbral anual** (por defecto S/ 30,000), igual que en el Reporte 30K. Cuando comparas menos de 12 meses, se ajusta en proporción al número de meses.
-- Indicadores: venta de cada año, variación en S/ y en %, tiendas que crecen o caen, tiendas nuevas o sin venta, y tiendas bajo el umbral.
-- Gráficos: venta mensual de un año frente al otro y variación % por cadena.
+- Muestra **el informe completo**: todas las cadenas, todos los meses del período y todas las tiendas. No hay umbral ni corte por monto.
+- Indicadores: venta de cada año, variación en S/ y en %, tiendas que crecen o caen, y tiendas nuevas o sin venta.
+- Gráficos: venta mensual de un año frente al otro y variación % de todas las cadenas.
 - Tablas: resumen por cadena, detalle mensual y **detalle por tienda**. Esta última tiene búsqueda, filtro por estado, orden por columna y, si quieres, las columnas de cada mes.
 - **Descargar Excel** (hojas Resumen, Por cadena, Mensual y Por tienda) y **Copiar tabla** para pegarla en Excel.
 
