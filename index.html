@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reporte Vs Anual</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">VS</span>
+      <div>
+        <h1>Reporte Vs Anual</h1>
+        <p class="sub">Comparativo de ventas año contra año · Below Trade</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="datos" role="tab">Datos del reporte</button>
+      <button class="tab" data-view="comparativo" role="tab">Comparativo</button>
+      <button class="tab" data-view="detalle" role="tab">Detalle por tienda</button>
+    </nav>
+    <label class="btn btn-primary upload-btn">
+      Subir archivos
+      <input type="file" id="fileInputTop" multiple accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
+    </label>
+  </header>
+
+  <main>
+    <!-- ============ DATOS ============ -->
+    <section id="view-datos" class="view active">
+      <div id="dropzone" class="dropzone">
+        <div class="dz-icon">⬆</div>
+        <p class="dz-title">Arrastra aquí tus archivos de ventas</p>
+        <p class="dz-hint">Excel (.xlsx, .xls, .xlsm), Excel binario (.xlsb) o CSV · puedes subir varios a la vez (por ejemplo, 2025 y 2026)</p>
+        <label class="btn btn-primary">
+          Elegir archivos
+          <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
+        </label>
+        <p class="dz-privacy">Los archivos se leen en tu navegador: no se envían a ningún servidor.</p>
+      </div>
+
+      <div id="loading" class="loading" hidden><span class="spinner"></span><span id="loadingText">Leyendo archivo…</span></div>
+
+      <div id="filesPanel" class="card" hidden>
+        <div class="card-head">
+          <h2>Archivos cargados</h2>
+          <div class="actions">
+            <button class="btn" id="btnClear">Quitar todos</button>
+            <button class="btn btn-primary" id="btnGoCompare">Ver comparativo →</button>
+          </div>
+        </div>
+        <p class="muted small">Revisa que cada columna esté bien detectada. Si algo no cuadra, cámbialo en la lista y se recalcula al momento.</p>
+        <div id="filesList"></div>
+      </div>
+    </section>
+
+    <!-- ============ COMPARATIVO ============ -->
+    <section id="view-comparativo" class="view">
+      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos del reporte</b> para ver el comparativo.</div>
+      <div data-content hidden>
+        <div class="filters card" id="filters">
+          <div class="f"><label>Año base</label><select id="fYearA"></select></div>
+          <div class="f"><label>Año a comparar</label><select id="fYearB"></select></div>
+          <div class="f"><label>Período</label>
+            <select id="fPeriod">
+              <option value="ytd">Mismos meses (YTD)</option>
+              <option value="full">Año completo</option>
+              <option value="custom">Rango de meses</option>
+            </select>
+          </div>
+          <div class="f" id="fRangeWrap" hidden><label>Meses</label>
+            <div class="range"><select id="fMonthFrom"></select><span>a</span><select id="fMonthTo"></select></div>
+          </div>
+          <div class="f"><label>Cadena</label><select id="fChain"></select></div>
+          <div class="f" id="fBrandWrap"><label>Marca</label><select id="fBrand"></select></div>
+          <div class="f"><label>Umbral anual (S/)</label><input type="number" id="fThreshold" min="0" step="1000" value="30000"></div>
+        </div>
+        <p class="period-note" id="periodNote"></p>
+
+        <div class="kpis" id="kpis"></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Venta mensual</h2><span class="legend" id="chartLegend"></span></div>
+            <div class="chart-box"><canvas id="chartMonthly" aria-label="Venta mensual año base vs año a comparar" role="img"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Variación por cadena</h2></div>
+            <div class="chart-box"><canvas id="chartChains" aria-label="Variación porcentual por cadena" role="img"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Resumen por cadena</h2>
+            <div class="actions"><button class="btn" data-copy="tblChains">Copiar tabla</button></div>
+          </div>
+          <div class="table-wrap"><table id="tblChains" class="tbl"></table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Detalle mensual</h2>
+            <div class="actions"><button class="btn" data-copy="tblMonths">Copiar tabla</button></div>
+          </div>
+          <div class="table-wrap"><table id="tblMonths" class="tbl"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DETALLE ============ -->
+    <section id="view-detalle" class="view">
+      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos del reporte</b> para ver el detalle.</div>
+      <div data-content hidden>
+        <div class="filters card">
+          <div class="f grow"><label>Buscar tienda</label><input type="search" id="fSearch" placeholder="Nombre o código de tienda…"></div>
+          <div class="f"><label>Estado</label>
+            <select id="fStatus">
+              <option value="">Todos</option>
+              <option value="crece">▲ Crece</option>
+              <option value="cae">▼ Cae</option>
+              <option value="nueva">● Nueva (sin venta en año base)</option>
+              <option value="perdida">✕ Sin venta en año a comparar</option>
+              <option value="bajo">⚠ Bajo umbral</option>
+            </select>
+          </div>
+          <div class="f"><label>Columnas</label>
+            <select id="fMonthCols">
+              <option value="no">Solo totales</option>
+              <option value="yes">Totales + meses del año a comparar</option>
+            </select>
+          </div>
+          <div class="f actions-f">
+            <button class="btn" data-copy="tblStores">Copiar tabla</button>
+            <button class="btn btn-primary" id="btnExport">Descargar Excel</button>
+          </div>
+        </div>
+        <p class="period-note" id="periodNote2"></p>
+        <div class="card">
+          <div class="card-head"><h2>Tiendas <span class="count" id="storeCount"></span></h2></div>
+          <div class="table-wrap tall"><table id="tblStores" class="tbl sortable"></table></div>
+          <div class="more" id="moreWrap" hidden><button class="btn" id="btnMore">Mostrar más</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- SheetJS (lee .xlsx, .xls, .xlsb y .csv): se intenta la versión más reciente del CDN oficial y, si no carga, la copia local -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script>window.XLSX || document.write('<script src="vendor/xlsx.full.min.js"><\/script>')</script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
