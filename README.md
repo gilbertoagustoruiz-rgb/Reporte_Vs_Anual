@@ -9,7 +9,10 @@ Publicada en: https://reporte-vs-anual.onrender.com
 - **Sube varios a la vez**: `.xlsx`, `.xls`, `.xlsm`, `.xlsb` y `.csv`/`.txt`. Puede ser un archivo por año o uno solo con todos.
 - Los archivos se leen en el navegador. A la base solo van las ventas resumidas.
 - **Detecta las columnas automáticamente**: Venta, Fecha (o Año + Mes, o Año + Semana), Semana, Cadena, Tienda/PDV, Marca y Unidades. Si alguna sale mal, la cambias en la lista y la app recuerda tu elección.
-- **Encuentra la fila de encabezados** aunque haya títulos arriba, y elige la hoja correcta del libro.
+- **Lee todas las hojas del libro**: si el archivo trae una hoja por mes (ENERO, FEBRERO… DICIEMBRE), las suma todas. Las hojas sin datos de venta utilizables, como un RESUMEN, se omiten. También puedes elegir una sola hoja.
+- Si una hoja no trae fecha, toma **el mes del nombre de la hoja** y **el año de la columna Año o del nombre del archivo** (por ejemplo, "ANUAL 2024.xlsb").
+- Antes de guardar muestra **los meses detectados por año**, y avisa si algún año trae un solo mes.
+- **Encuentra la fila de encabezados** aunque haya títulos arriba.
 - También lee reportes en **formato ancho** (los meses como columnas). Las filas de TOTAL se omiten.
 - **CSV**: detecta el separador y la codificación, y acepta los formatos `1,234.56` y `1.234,56`. Las fechas se leen como día/mes/año.
 

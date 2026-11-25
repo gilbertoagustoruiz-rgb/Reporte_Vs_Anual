@@ -284,36 +284,57 @@
     return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
   }
 
-  function pickSheet(wb) {
-    let best = wb.SheetNames[0], bestScore = -1;
-    for (const n of wb.SheetNames) {
-      const rows = sheetRows(wb, n);
-      if (!rows.length) continue;
-      const h = rows[detectHeaderRow(rows)] || [];
-      const m = detectMapping(h.map((x) => (x == null ? '' : String(x))), rows);
-      const score = Object.keys(m).length * 1000 + Math.min(rows.length, 999);
-      if (score > bestScore) { bestScore = score; best = n; }
-    }
-    return best;
-  }
+  const ALL_SHEETS = '__all__';
 
-  function prepareFile(f, opts = {}) {
-    const sheet = opts.sheet ?? f.sheet ?? pickSheet(f.wb);
+  /** Prepara una hoja: encabezados, filas y columnas detectadas. */
+  function preparePart(f, sheet, headerRowOpt, mappingOpt) {
     const all = sheetRows(f.wb, sheet);
-    const headerRow = opts.headerRow ?? detectHeaderRow(all);
+    const headerRow = headerRowOpt ?? detectHeaderRow(all);
     const rawHeaders = all[headerRow] || [];
     const width = all.reduce((w, r) => Math.max(w, r ? r.length : 0), 0);
     const headers = Array.from({ length: width }, (_, i) => rawHeaders[i]);
     const headerText = headers.map((h, i) => (h == null || h === '' ? `Columna ${XLSX.utils.encode_col(i)}` : h instanceof Date ? `${MESES[h.getMonth()]}-${h.getFullYear()}` : String(h).trim()));
     const rows = all.slice(headerRow + 1);
     const sig = 'map:' + headerText.map(norm).join('|');
-    let mapping = opts.mapping ?? store.get(sig, null) ?? detectMapping(headerText, rows);
-    Object.assign(f, { sheet, headerRow, headers, headerText, rows, mapping, sig, totalRows: all.length });
+    const mapping = mappingOpt ?? store.get(sig, null) ?? detectMapping(headerText, rows);
+    // Si la hoja se llama como un mes (ENERO, Feb-26…), ese mes sirve cuando la fila no trae fecha.
+    const sheetYM = parseYM(sheet);
+    const sheetMonth = sheetYM ? sheetYM.m : monthWord(String(sheet).trim());
+    return { sheet, headerRow, headers, headerText, rows, mapping, sig, totalRows: all.length, sheetMonth, sheetYear: sheetYM ? sheetYM.y : null };
+  }
+
+  /** Hojas con datos de venta utilizables. */
+  function usableSheets(f) {
+    const out = [];
+    for (const n of f.wb.SheetNames) {
+      const p = preparePart(f, n);
+      if (!p.rows.length) continue;
+      const m = p.mapping;
+      const hasDate = m.fecha != null || m.anio != null || m.mes != null || m.semana != null || p.sheetMonth;
+      const wide = detectWideColumns(p.headers, m).length >= 2;
+      if ((m.venta != null && hasDate) || wide) out.push(n);
+    }
+    return out;
+  }
+
+  function prepareFile(f, opts = {}) {
+    f.fileYear = parseYear((f.name.match(/(19|20)\d{2}/) || [])[0]);
+    if (opts.sheet !== undefined) f.sheetMode = opts.sheet;
+    if (f.sheetMode === undefined) {
+      const ok = usableSheets(f);
+      f.usable = ok;
+      f.sheetMode = ok.length >= 2 ? ALL_SHEETS : (ok[0] ?? f.wb.SheetNames[0]);
+    }
+    if (!f.usable) f.usable = usableSheets(f);
+    const names = f.sheetMode === ALL_SHEETS ? f.usable : [f.sheetMode];
+    const single = names.length === 1;
+    f.parts = names.map((n) => preparePart(f, n, single ? opts.headerRow : undefined, single ? opts.mapping : undefined));
+    const first = f.parts[0] || preparePart(f, f.wb.SheetNames[0]);
+    Object.assign(f, { sheet: first.sheet, headerRow: first.headerRow, headers: first.headers, headerText: first.headerText, mapping: first.mapping, sig: first.sig, totalRows: first.totalRows });
     buildFileAgg(f);
   }
 
   function buildFileAgg(f) {
-    const { rows, mapping: mp } = f;
     const agg = new Map();
     const warnings = [];
     let used = 0, noDate = 0, noAmt = 0;
@@ -321,39 +342,43 @@
     let total = 0;
     let maxStamp = 0, maxDate = null;
     const maxByYear = {};
-    const wide = mp.venta == null ? detectWideColumns(f.headers, mp) : [];
-    f.wide = wide.length >= 2;
+    const monthsByYear = {};
+    const partErrors = [];
+    let anyWide = false;
     f.error = null;
 
-    if (mp.venta == null && !f.wide) {
-      f.error = 'No encontré la columna de venta. Elígela en la lista "Venta (S/)".';
-    } else if (!f.wide && mp.fecha == null && mp.mes == null && mp.anio == null) {
-      f.error = 'No encontré la fecha ni el año/mes. Elige la columna "Fecha" o las columnas "Año" y "Mes".';
-    }
+    const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
+    const add = (cad, tie, mar, y, m, w, v, u, d = null) => {
+      const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0);
+      const cur = agg.get(key);
+      if (cur) { cur.v += v; cur.u += u; } else agg.set(key, { v, u });
+      years.add(y); total += v; used++;
+      if (v) {
+        (monthsByYear[y] || (monthsByYear[y] = new Set())).add(m);
+        const stamp = y * 10000 + m * 100 + (d || 0);
+        if (stamp > maxStamp) { maxStamp = stamp; maxDate = { y, m, d, w: w || 0 }; }
+        if (!maxByYear[y] || stamp > maxByYear[y].stamp) maxByYear[y] = { stamp, m, d };
+      }
+    };
+    const isTotal = (cad, tie) => /^(total|sub ?total|gran total)\b/.test(norm(tie)) || /^(total|sub ?total|gran total)\b/.test(norm(cad));
 
-    if (!f.error) {
+    for (const part of f.parts) {
+      const { rows, mapping: mp } = part;
+      const wide = mp.venta == null ? detectWideColumns(part.headers, mp) : [];
+      const isWide = wide.length >= 2;
+      anyWide = anyWide || isWide;
+      const fallbackYear = part.sheetYear || f.fileYear;
+      if (mp.venta == null && !isWide) { partErrors.push(`${part.sheet}: no encontré la columna de venta.`); continue; }
+      if (!isWide && mp.fecha == null && mp.mes == null && mp.anio == null && mp.semana == null && !part.sheetMonth) { partErrors.push(`${part.sheet}: no encontré fecha, año ni mes.`); continue; }
       const val = (r, k) => (mp[k] == null ? null : r[mp[k]]);
-      const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
-      const add = (cad, tie, mar, y, m, w, v, u, d = null) => {
-        const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0);
-        const cur = agg.get(key);
-        if (cur) { cur.v += v; cur.u += u; } else agg.set(key, { v, u });
-        years.add(y); total += v; used++;
-        if (v) {
-          const stamp = y * 10000 + m * 100 + (d || 0);
-          if (stamp > maxStamp) { maxStamp = stamp; maxDate = { y, m, d, w: w || 0 }; }
-          if (!maxByYear[y] || stamp > maxByYear[y].stamp) maxByYear[y] = { stamp, m, d };
-        }
-      };
       for (const r of rows) {
         if (!r) continue;
         const cad = label(val(r, 'cadena'), '(Sin cadena)');
         const tie = label(val(r, 'tienda'), '(Sin tienda)');
         const mar = label(val(r, 'marca'), '');
-        if (f.wide) {
+        if (isWide) {
           if (mp.tienda != null && val(r, 'tienda') == null && mp.cadena != null && val(r, 'cadena') == null) continue;
-          const tieN = norm(tie);
-          if (/^(total|sub ?total|gran total)\b/.test(tieN) || /^(total|sub ?total|gran total)\b/.test(norm(cad))) continue;
+          if (isTotal(cad, tie)) continue;
           for (const c of wide) {
             const v = parseAmount(r[c.i]);
             if (v == null || v === 0) continue;
@@ -365,31 +390,47 @@
         if (v == null) { if (r.some((c) => c != null && c !== '')) noAmt++; continue; }
         let ym = null;
         if (mp.fecha != null) ym = parseYM(val(r, 'fecha'));
-        if (!ym && mp.anio != null) {
-          const y = parseYear(val(r, 'anio'));
-          const m = mp.mes != null ? parseMonth(val(r, 'mes')) : null;
+        if (!ym && mp.mes != null) {
+          const m = parseMonth(val(r, 'mes'));
+          const y = (mp.anio != null ? parseYear(val(r, 'anio')) : null) || parseYM(val(r, 'mes'))?.y || fallbackYear;
           if (y && m) ym = { y, m, d: null };
         }
-        if (!ym && mp.mes != null) ym = parseYM(val(r, 'mes'));
-        if (ym && mp.semana != null && mp.anio != null && mp.mes == null && mp.fecha == null) ym = null;
-        if (!ym && mp.anio != null && mp.semana != null) {
-          const y = parseYear(val(r, 'anio')), w = parseWeek(val(r, 'semana'));
+        if (!ym && mp.semana != null) {
+          const y = (mp.anio != null ? parseYear(val(r, 'anio')) : null) || fallbackYear, w = parseWeek(val(r, 'semana'));
           if (y && w) { const wd = (new Date(Date.UTC(y, 0, 1)).getUTCDay() + 6) % 7; const dt = new Date(Date.UTC(y, 0, 1 + (w - 1) * 7 - wd + 3)); ym = { y, m: dt.getUTCFullYear() === y ? dt.getUTCMonth() + 1 : (w < 10 ? 1 : 12), d: null }; }
         }
+        if (!ym && part.sheetMonth) {
+          const y = (mp.anio != null ? parseYear(val(r, 'anio')) : null) || fallbackYear;
+          if (y) ym = { y, m: part.sheetMonth, d: null };
+        }
         if (!ym) { noDate++; continue; }
-        if (/^(total|sub ?total|gran total)\b/.test(norm(tie)) || /^(total|sub ?total|gran total)\b/.test(norm(cad))) continue;
+        if (isTotal(cad, tie)) continue;
         const u = mp.unidades != null ? parseAmount(val(r, 'unidades')) || 0 : 0;
         let w = ym.d ? weekOf(ym.y, ym.m, ym.d) : 0;
         if (mp.semana != null) w = parseWeek(val(r, 'semana')) || w;
         add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d);
       }
-      if (!used) f.error = 'No pude leer ninguna fila con venta y fecha. Revisa la fila de encabezados y las columnas elegidas.';
-      if (noDate) warnings.push(`${num(noDate)} filas sin fecha válida se omitieron.`);
-      if (noAmt > 0 && noAmt > used * 0.05) warnings.push(`${num(noAmt)} filas sin monto de venta se omitieron.`);
-      if (!f.wide && mp.tienda == null) warnings.push('No hay columna de tienda: el detalle por tienda saldrá agrupado.');
-      if (f.wide && mp.anio == null && mp.mes == null && mp.fecha == null) warnings.push(`Formato ancho: ${wide.length} columnas de mes detectadas como ventas.`);
     }
-    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear });
+    if (!used) f.error = partErrors[0] || 'No pude leer ninguna fila con venta y fecha. Revisa la fila de encabezados y las columnas elegidas.';
+    else partErrors.forEach((e) => warnings.push('Hoja omitida · ' + e));
+    if (noDate) warnings.push(`${num(noDate)} filas sin fecha válida se omitieron.`);
+    if (noAmt > 0 && noAmt > used * 0.05) warnings.push(`${num(noAmt)} filas sin monto de venta se omitieron.`);
+    if (used && !anyWide && f.mapping.tienda == null) warnings.push('No hay columna de tienda: el detalle por tienda saldrá agrupado.');
+    // Aviso clave: un año con un solo mes suele indicar que faltan hojas o que la columna de fecha no es la correcta.
+    for (const y in monthsByYear) {
+      if (monthsByYear[y].size === 1) {
+        const m = [...monthsByYear[y]][0];
+        warnings.push(`⚠ El año ${y} solo tiene datos de ${MESES_LARGO[m - 1].toLowerCase()}. Si el archivo trae más meses, revisa la hoja elegida o la columna de fecha/mes.`);
+      }
+    }
+    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide });
+  }
+
+  function monthsText(set) {
+    const ms = [...set].sort((a, b) => a - b);
+    if (!ms.length) return '';
+    const contiguous = ms[ms.length - 1] - ms[0] + 1 === ms.length;
+    return contiguous ? (ms.length === 1 ? MESES[ms[0] - 1] : `${MESES[ms[0] - 1]}–${MESES[ms[ms.length - 1] - 1]}`) : ms.map((m) => MESES[m - 1]).join(', ');
   }
 
   // ---------------------------------------------------------------- servidor (base de datos)
@@ -538,6 +579,9 @@
     if (!P.rows.length) return;
     const exist = new Set((serverData?.anios || []).map((a) => a.anio));
     const rep = P.anios.filter((a) => exist.has(a.anio)).map((a) => a.anio);
+    const single = [];
+    for (const f of state.files.filter((x) => !x.error)) for (const y in f.monthsByYear || {}) if (f.monthsByYear[y].size === 1) single.push(`${y} (${f.name})`);
+    if (single.length && !confirm(`Atención: estos años solo traen un mes de datos: ${single.join(', ')}.\n\nSi los archivos deberían tener todo el año, cancela y revisa la hoja o la columna de fecha. ¿Guardar de todos modos?`)) return;
     if (rep.length && !confirm(`Los años ${rep.join(', ')} ya están en la base y se reemplazarán por completo con estos archivos. ¿Continuar?`)) return;
     const btn = $('#btnSave');
     btn.disabled = true; btn.textContent = 'Guardando…';
@@ -589,7 +633,7 @@
         state.files.push(f);
       } catch (err) {
         console.error(err);
-        state.files.push({ id: ++fileSeq, name: file.name, size: file.size, wb: null, error: 'No se pudo leer el archivo: ' + (err.message || err), headers: [], headerText: [], mapping: {}, warnings: [], years: [], used: 0, total: 0 });
+        state.files.push({ id: ++fileSeq, name: file.name, size: file.size, wb: null, parts: [], monthsByYear: {}, error: 'No se pudo leer el archivo: ' + (err.message || err), headers: [], headerText: [], mapping: {}, warnings: [], years: [], used: 0, total: 0 });
       }
     }
     $('#loading').hidden = true;
@@ -605,14 +649,15 @@
     const wrap = $('#filesList');
     wrap.innerHTML = state.files.map((f) => {
       const ok = !f.error;
+      const multi = f.usable && f.usable.length >= 2;
       const sheetSel = f.wb && f.wb.SheetNames.length > 1
-        ? `<select data-act="sheet" data-id="${f.id}" title="Hoja">${f.wb.SheetNames.map((n) => `<option ${n === f.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : '';
-      const hdrSel = f.wb
+        ? `<select data-act="sheet" data-id="${f.id}" title="Hoja">${multi ? `<option value="${ALL_SHEETS}" ${f.sheetMode === ALL_SHEETS ? 'selected' : ''}>Todas las hojas (${f.usable.length})</option>` : ''}${f.wb.SheetNames.map((n) => `<option value="${esc(n)}" ${f.sheetMode === n ? 'selected' : ''}>Hoja: ${esc(n)}</option>`).join('')}</select>` : '';
+      const hdrSel = f.wb && f.sheetMode !== ALL_SHEETS
         ? `<select data-act="header" data-id="${f.id}" title="Fila de encabezados">${Array.from({ length: Math.min(30, f.totalRows || 1) }, (_, i) => `<option value="${i}" ${i === f.headerRow ? 'selected' : ''}>Encabezados en fila ${i + 1}</option>`).join('')}</select>` : '';
       const opts = (sel) => `<option value="">(ninguna)</option>` + f.headerText.map((h, i) => `<option value="${i}" ${sel === i ? 'selected' : ''}>${esc(h)}</option>`).join('');
       const map = f.wb ? `<div class="map-grid">${ROLES.map((r) => `<div><label>${r.label}</label><select data-act="map" data-role="${r.key}" data-id="${f.id}">${opts(f.mapping[r.key])}</select></div>`).join('')}</div>` : '';
       const info = ok
-        ? `<span class="badge ok">✓ ${num(f.used)} registros</span><span class="badge">Años: ${f.years.join(', ') || '—'}</span><span class="badge">${money(f.total)}</span>${f.wide ? '<span class="badge">Formato ancho</span>' : ''}`
+        ? `<span class="badge ok">✓ ${num(f.used)} registros</span>${Object.keys(f.monthsByYear || {}).sort().map((y) => `<span class="badge ${f.monthsByYear[y].size === 1 ? 'err' : ''}">${y}: ${monthsText(f.monthsByYear[y])} (${f.monthsByYear[y].size} ${f.monthsByYear[y].size === 1 ? 'mes' : 'meses'})</span>`).join('')}${f.sheetMode === ALL_SHEETS ? `<span class="badge">${f.parts.length} hojas</span>` : ''}<span class="badge">${money(f.total)}</span>${f.wide ? '<span class="badge">Formato ancho</span>' : ''}`
         : `<span class="badge err">Revisar</span>`;
       const warns = [f.error, ...(f.warnings || [])].filter(Boolean).map((w) => `<div class="file-warn">${esc(w)}</div>`).join('');
       return `<div class="file-item">
@@ -628,8 +673,8 @@
     const f = state.files.find((x) => x.id === +el.dataset.id);
     if (!f) return;
     const act = el.dataset.act;
-    if (act === 'sheet') prepareFile(f, { sheet: el.value, headerRow: undefined });
-    else if (act === 'header') prepareFile(f, { sheet: f.sheet, headerRow: +el.value, mapping: undefined });
+    if (act === 'sheet') prepareFile(f, { sheet: el.value });
+    else if (act === 'header') prepareFile(f, { headerRow: +el.value });
     else if (act === 'map') {
       const role = el.dataset.role;
       const mapping = { ...f.mapping };
@@ -641,6 +686,8 @@
       }
       f.mapping = mapping;
       store.set(f.sig, mapping);
+      // En modo "todas las hojas", el cambio se aplica a las hojas con los mismos encabezados.
+      for (const p of f.parts) if (p.sig === f.sig) p.mapping = mapping;
       buildFileAgg(f);
     }
     rebuildAll();
