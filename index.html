@@ -38,6 +38,7 @@
         </div>
         <p class="muted small">Esto es lo que ven todas las personas que abren el reporte.</p>
         <div class="table-wrap"><table id="tblBase" class="tbl"></table></div>
+        <details class="history" id="brandsBox" open hidden><summary>Marcas detectadas</summary><p class="muted small" id="brandsNote"></p><div class="table-wrap"><table id="tblMarcas" class="tbl"></table></div></details>
         <details class="history"><summary>Últimas cargas</summary><div class="table-wrap"><table id="tblCargas" class="tbl"></table></div></details>
       </div>
 
@@ -83,6 +84,13 @@
         <div class="cut-banner" id="cutBanner"></div>
         <div class="filters card">
           <div class="f"><label>Desde el año</label><select id="fFrom"></select></div>
+          <div class="f" id="fTipoWrap"><label>Tipo de venta</label>
+            <select id="fTipo">
+              <option value="">Todas (Paraíso + Competencia)</option>
+              <option value="paraiso">Solo venta Paraíso</option>
+              <option value="competencia">Solo venta Competencia</option>
+            </select>
+          </div>
           <div class="f"><label>Cadena</label><select id="fChain"></select></div>
           <div class="f" id="fBrandWrap"><label>Marca</label><select id="fBrand"></select></div>
           <div class="f" id="fMeasureWrap"><label>Medida</label>
@@ -110,6 +118,13 @@
           <div class="card-head"><h2>Año completo por año</h2></div>
           <div class="chart-box"><canvas id="chartYearsFull" role="img" aria-label="Venta de año completo por año"></canvas></div>
         </div>
+      </div>
+      <div class="card" id="groupsCard" hidden>
+        <div class="card-head"><h2>Venta Paraíso vs Competencia (acumulado al corte)</h2><span class="legend" id="groupLegend"></span></div>
+        <div class="chart-box"><canvas id="chartGroups" role="img" aria-label="Venta Paraíso y venta competencia por año"></canvas></div>
+        <div class="card-head" style="margin-top:14px"><h2>Paraíso vs Competencia por año</h2><div class="actions"><button class="btn" data-copy="groups">Copiar tabla</button></div></div>
+        <div class="table-wrap"><table id="tblGroups" class="tbl"></table></div>
+        <p class="note">Venta Paraíso: PARAISO, VIVA-HOME, CASA JOVEN, KREA y KOMFORT. Venta Competencia: todas las demás marcas.</p>
       </div>
       <div class="card">
         <div class="card-head"><h2>Evaluación por año</h2><div class="actions"><button class="btn" data-copy="years">Copiar tabla</button></div></div>

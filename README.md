@@ -35,6 +35,23 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 - Filtros: **desde el año**, **cadena** y **marca**.
 - **Descargar Excel**: un libro con las hojas Por año, Por mes, Por semana, Por cadena y Por tienda. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
+## Venta Paraíso vs Competencia
+
+Cada marca se clasifica en uno de dos grupos:
+
+- **Venta Paraíso**: PARAISO, VIVA-HOME, CASA JOVEN, KREA y KOMFORT. Se reconocen aunque vengan escritas distinto, por ejemplo "Paraíso" o "Viva Home".
+- **Venta Competencia**: todas las demás marcas.
+
+Lo que agrega esta clasificación:
+
+- **Filtro "Tipo de venta"**: Todas, Solo venta Paraíso o Solo venta Competencia.
+- **En "Por año"**: un gráfico y una tabla de Paraíso frente a Competencia, con la participación de Paraíso en el acumulado al corte, en el mes y la semana de corte y en el año completo. La variación de la participación se muestra en puntos porcentuales (pp).
+- **Indicador** de participación Paraíso.
+- **En "Por cadena" y "Por tienda"**: una columna con la participación Paraíso del último año.
+- **En "Datos"**: la lista de marcas detectadas y el grupo de cada una, para revisarla.
+
+La lista de marcas Paraíso está en `app.js`, en la constante `MARCAS_PARAISO`.
+
 ## Base de datos compartida
 
 Los datos se guardan en PostgreSQL (base **Proyectos_Below_Db**, esquema `reporte_vs_anual`), así que todas las personas ven el mismo reporte.

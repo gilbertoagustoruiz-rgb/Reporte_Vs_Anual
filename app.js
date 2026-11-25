@@ -443,7 +443,7 @@
 
   function applyServerData(D) {
     const { dict } = D;
-    const records = D.rows.map(([ci, ti, mi, y, m, w, v, u]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], y, m, w, v, u }));
+    const records = D.rows.map(([ci, ti, mi, y, m, w, v, u]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], tipo: tipoDe(dict.marcas[mi]), y, m, w, v, u }));
     const years = [...new Set(records.filter((r) => r.v).map((r) => r.y))].sort((a, b) => a - b);
     const weekYears = new Set(records.filter((r) => r.w > 0 && r.v).map((r) => r.y));
     let cut = null;
@@ -481,6 +481,20 @@
     </tr>`).join('');
     $('#tblBase').innerHTML = `<thead><tr><th>Año</th><th>Último dato</th><th class="num">Registros</th><th class="num">Venta</th><th>Subido por</th><th>Actualizado</th><th>Archivos</th>${logged ? '<th></th>' : ''}</tr></thead>
       <tbody>${rows || `<tr><td colspan="8" class="muted">La base todavía está vacía.</td></tr>`}</tbody>`;
+    const last = state.years[state.years.length - 1];
+    const bm = new Map();
+    for (const r of state.records) {
+      if (!r.marca) continue;
+      const o = bm.get(r.marca) || { total: 0, last: 0 };
+      o.total += r.v; if (r.y === last) o.last += r.v;
+      bm.set(r.marca, o);
+    }
+    const marcas = [...bm.entries()].sort((a, b) => (tipoDe(a[0]) === 'paraiso' ? 0 : 1) - (tipoDe(b[0]) === 'paraiso' ? 0 : 1) || b[1].total - a[1].total);
+    $('#brandsBox').hidden = !marcas.length;
+    $('#tblMarcas').innerHTML = `<thead><tr><th>Marca</th><th>Grupo</th><th class="num">Venta total</th><th class="num">Venta ${last ?? ''}</th></tr></thead><tbody>${
+      marcas.map(([m, o]) => { const t = tipoDe(m); return `<tr><td>${esc(m)}</td><td><span class="pill ${t === 'paraiso' ? 'crece' : 'igual'}">${TIPO_LABEL[t]}</span></td><td class="num">${money(o.total)}</td><td class="num">${money(o.last)}</td></tr>`; }).join('')}</tbody>`;
+    const noBrand = state.records.filter((r) => !r.marca && r.v).length;
+    $('#brandsNote').textContent = `Grupo Paraíso: ${MARCAS_PARAISO.join(', ')}. Todas las demás marcas cuentan como venta de la competencia.` + (noBrand ? ` Hay ${num(noBrand)} registros sin marca: no entran en ninguno de los dos grupos.` : '');
     $('#tblCargas').innerHTML = `<thead><tr><th>Fecha</th><th>Usuario</th><th>Años</th><th class="num">Registros</th><th class="num">Venta</th><th>Archivos</th></tr></thead><tbody>${
       D.cargas.map((c) => `<tr><td>${new Date(c.creado_en).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${esc(c.usuario || '—')}</td><td>${c.anios.join(', ')}</td><td class="num">${num(c.filas)}</td><td class="num">${money(c.total)}</td><td class="muted small">${esc(c.archivos.join(', '))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin cargas.</td></tr>'}</tbody>`;
   }
@@ -645,12 +659,29 @@
 
     const chains = [...new Set(state.records.map((r) => r.cadena))].sort((a, b) => a.localeCompare(b, 'es'));
     setOpts($('#fChain'), [['', 'Todas'], ...chains.map((c) => [c, c])], $('#fChain').value);
+    const this_brand = $('#fBrand').value;
     const brands = [...new Set(state.records.map((r) => r.marca).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
     setOpts($('#fBrand'), [['', 'Todas'], ...brands.map((c) => [c, c])], $('#fBrand').value);
     $('#fBrandWrap').hidden = !brands.length;
+    $('#fTipoWrap').hidden = !brands.length;
+    // Marca: muestra a qué grupo pertenece cada una.
+    $('#fBrand').innerHTML = [['', 'Todas'], ...brands.map((c) => [c, `${c} · ${tipoDe(c) === 'paraiso' ? 'Paraíso' : 'Competencia'}`])].map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
+    if (brands.includes(this_brand)) $('#fBrand').value = this_brand;
     const weekOpt = $('#fMeasure option[value="week"]');
     weekOpt.disabled = !(state.cut && state.cut.w);
     if (weekOpt.disabled && $('#fMeasure').value === 'week') $('#fMeasure').value = 'ytd';
+  }
+
+  // ---------------------------------------------------------------- marcas: venta Paraíso vs competencia
+  // Grupo Paraíso: estas marcas son "Venta Paraíso"; cualquier otra marca es "Venta Competencia".
+  const MARCAS_PARAISO = ['PARAISO', 'VIVA-HOME', 'CASA JOVEN', 'KREA', 'KOMFORT'];
+  const compact = (s) => norm(s).replace(/\s+/g, '');
+  const PARAISO_SET = new Set(MARCAS_PARAISO.map(compact));
+  const TIPO_LABEL = { paraiso: 'Venta Paraíso', competencia: 'Venta Competencia', sinmarca: 'Sin marca' };
+  function tipoDe(marca) {
+    const c = compact(marca);
+    if (!c) return 'sinmarca';
+    return PARAISO_SET.has(c) ? 'paraiso' : 'competencia';
   }
 
   // ---------------------------------------------------------------- colores por año
@@ -679,9 +710,11 @@
     const C = cutInfo();
     const from = +$('#fFrom').value || state.years[0];
     const years = state.years.filter((y) => y >= from && y <= C.y);
-    const chain = $('#fChain').value, brand = $('#fBrand').value;
-    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand));
-    return { C, from, years, chain, brand, recs, measure: $('#fMeasure').value };
+    const chain = $('#fChain').value, brand = $('#fBrand').value, tipo = state.hasBrand ? $('#fTipo').value : '';
+    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo));
+    // La participación Paraíso solo tiene sentido viendo todas las marcas.
+    const showShare = state.hasBrand && !tipo && !brand;
+    return { C, from, years, chain, brand, tipo, showShare, recs, measure: $('#fMeasure').value };
   }
 
   const blank = () => ({ full: 0, ytd: 0, month: 0, week: 0 });
@@ -689,7 +722,7 @@
   function compute(F) {
     const { C } = F;
     const inYtd = (r) => (C.hasW && state.weekYears.has(r.y) && r.w > 0 ? r.w <= C.w : r.m <= C.m);
-    const byYear = new Map(F.years.map((y) => [y, { ...blank(), u: 0, stores: new Set(), storesFull: new Set() }]));
+    const byYear = new Map(F.years.map((y) => [y, { ...blank(), u: 0, stores: new Set(), storesFull: new Set(), p: blank(), c: blank() }]));
     const byYM = new Map(), byYW = new Map();
     const byChain = new Map(), byStore = new Map();
     let maxW = 0;
@@ -702,13 +735,21 @@
       if (ytd) { Y.ytd += r.v; Y.u += r.u; if (r.v) Y.stores.add(sk); }
       if (mo) Y.month += r.v;
       if (wk) Y.week += r.v;
+      if (r.tipo !== 'sinmarca') {
+        const G = r.tipo === 'paraiso' ? Y.p : Y.c;
+        G.full += r.v; if (ytd) G.ytd += r.v; if (mo) G.month += r.v; if (wk) G.week += r.v;
+      }
       byYM.set(r.y * 100 + r.m, (byYM.get(r.y * 100 + r.m) || 0) + r.v);
       if (r.w > 0) { byYW.set(r.y * 100 + r.w, (byYW.get(r.y * 100 + r.w) || 0) + r.v); if (r.v) maxW = Math.max(maxW, r.w); }
       for (const [map, key, base] of [[byChain, r.cadena, { cadena: r.cadena }], [byStore, sk, { cadena: r.cadena, tienda: r.tienda }]]) {
         let o = map.get(key);
-        if (!o) map.set(key, (o = { ...base, y: {} }));
+        if (!o) map.set(key, (o = { ...base, y: {}, yp: {} }));
         const oy = o.y[r.y] || (o.y[r.y] = blank());
         oy.full += r.v; if (ytd) oy.ytd += r.v; if (mo) oy.month += r.v; if (wk) oy.week += r.v;
+        if (r.tipo === 'paraiso') {
+          const op = o.yp[r.y] || (o.yp[r.y] = blank());
+          op.full += r.v; if (ytd) op.ytd += r.v; if (mo) op.month += r.v; if (wk) op.week += r.v;
+        }
       }
     }
     return { byYear, byYM, byYW, byChain, byStore, maxW };
@@ -741,6 +782,25 @@
       return row;
     });
     return { head, rows, foot: [], types, varCols: [2, 4, 5, 7, 9] };
+  }
+
+  function groupsAOA(F, R) {
+    const { C } = F;
+    const share = (G, A, k) => (G[k] + A[k] > 0 ? G[k] / (G[k] + A[k]) : null);
+    const head = ['Año', 'Venta Paraíso (acum.)', 'Var %', 'Venta Competencia (acum.)', 'Var %', 'Part. Paraíso (acum.)', 'Var pp', `Part. Paraíso ${MESES[C.m - 1]}`];
+    const types = ['t', '$', '%', '$', '%', 'p', 'pp', 'p'];
+    if (C.hasW) { head.push(`Part. Paraíso sem ${C.w}`); types.push('p'); }
+    head.push('Venta Paraíso (año completo)', 'Venta Competencia (año completo)', 'Part. Paraíso (año completo)');
+    types.push('$', '$', 'p');
+    const rows = F.years.map((y) => {
+      const Y = R.byYear.get(y), P = R.byYear.get(y - 1);
+      const sh = share(Y.p, Y.c, 'ytd'), shP = P ? share(P.p, P.c, 'ytd') : null;
+      const row = [String(y) + (y === C.y ? ' *' : ''), Y.p.ytd, P ? varPct(Y.p.ytd, P.p.ytd) : null, Y.c.ytd, P ? varPct(Y.c.ytd, P.c.ytd) : null, sh, sh != null && shP != null ? sh - shP : null, share(Y.p, Y.c, 'month')];
+      if (C.hasW) row.push(state.weekYears.has(y) ? share(Y.p, Y.c, 'week') : null);
+      row.push(Y.p.full, Y.c.full, share(Y.p, Y.c, 'full'));
+      return row;
+    });
+    return { head, rows, foot: [], types, varCols: [2, 4, 6] };
   }
 
   function monthsAOA(F, R) {
@@ -802,7 +862,8 @@
     const totLast = list.reduce((t, o) => t + val(o, last), 0);
     let items = list.map((o) => {
       const b = val(o, last), a = prev ? val(o, prev) : 0;
-      return { o, b, a, d: b - a, p: varPct(b, a), st: statusOf(a, b), share: totLast ? b / totLast : null };
+      const pb = o.yp[last] ? o.yp[last][measure] : 0;
+      return { o, b, a, d: b - a, p: varPct(b, a), st: statusOf(a, b), share: totLast ? b / totLast : null, pShare: b > 0 ? pb / b : null };
     }).filter((x) => ys.some((y) => val(x.o, y)));
     if (isStore) {
       const q = norm($('#fSearch').value), st = $('#fStatus').value;
@@ -821,18 +882,21 @@
     const types = [...(isStore ? ['t', 't'] : ['t']), ...ys.map(() => '$')];
     if (prev) { head.push(`Var S/ ${last} vs ${prev}`, 'Var %', 'Estado'); keys.push('d', 'p', 'st'); types.push('$', '%', 't'); }
     head.push(`Part. ${last}`); keys.push('share'); types.push('p');
+    if (F.showShare) { head.push(`Part. Paraíso ${last}`); keys.push('pShare'); types.push('p'); }
     const rows = items.map((x) => {
       const r = [...(isStore ? [x.o.cadena, x.o.tienda] : [x.o.cadena]), ...ys.map((y) => val(x.o, y))];
       if (prev) r.push(x.d, x.p, STATUS_LABEL[x.st].replace(/^\S+\s/, ''));
       r.push(x.share);
+      if (F.showShare) r.push(x.pShare);
       return r;
     });
     const sums = ys.map((y) => items.reduce((t, x) => t + val(x.o, y), 0));
     const tot = [...(isStore ? ['Total', `${num(items.length)} tiendas`] : [`Total (${num(items.length)})`]), ...sums];
     if (prev) { const b = sums[ys.indexOf(last)], a = sums[ys.indexOf(prev)]; tot.push(b - a, varPct(b, a), ''); }
     tot.push(totLast && items.length ? sums[ys.indexOf(last)] / totLast : null);
-    const n = head.length;
-    return { head, rows, foot: [tot], types, keys, items, varCols: prev ? [n - 4, n - 3] : [], stCol: prev ? n - 2 : -1 };
+    if (F.showShare) { const pb = items.reduce((t, x) => t + (x.o.yp[last] ? x.o.yp[last][measure] : 0), 0), b = sums[ys.indexOf(last)]; tot.push(b > 0 ? pb / b : null); }
+    const iD = keys.indexOf('d');
+    return { head, rows, foot: [tot], types, keys, items, varCols: prev ? [iD, iD + 1] : [], stCol: prev ? keys.indexOf('st') : -1 };
   }
 
   // ---------------------------------------------------------------- render
@@ -843,6 +907,7 @@
     if (t === '$') return money(v);
     if (t === '%') return pct(v);
     if (t === 'p') return fmtPct.format(v);
+    if (t === 'pp') return (v > 0 ? '+' : '') + (v * 100).toFixed(1) + ' pp';
     if (t === 'n') return num(v);
     return esc(v);
   }
@@ -881,6 +946,8 @@
     renderKpis(F, R);
     renderYearCharts(F, R);
     renderTable('tblYears', yearsAOA(F, R));
+    $('#groupsCard').hidden = !F.showShare;
+    if (F.showShare) { renderTable('tblGroups', groupsAOA(F, R)); renderGroupChart(F, R); }
     $('#noteYears').textContent = `* ${F.C.y} es el año en curso: su "Año completo" llega solo hasta el corte, por eso no se compara con el año anterior. El acumulado de cada año se calcula hasta el mismo punto (${F.C.hasW ? 'semana ' + F.C.w : MESES_LARGO[F.C.m - 1]}) para comparar en igualdad de condiciones.` + (F.C.hasW && F.years.some((y) => !state.weekYears.has(y)) ? ' Los años sin fecha diaria se acumulan hasta el mes de corte completo.' : '');
     renderLines('chartMonths', 'm', F, R, MESES, (y, i) => (y === F.C.y && i + 1 > F.C.m ? null : R.byYM.get(y * 100 + i + 1) || 0), F.years);
     renderTable('tblMonths', monthsAOA(F, R));
@@ -911,7 +978,7 @@
     const parts = [`<b>Año ${C.y}</b>`, `<b>${C.monthLabel}</b>`];
     if (C.hasW) parts.push(`<b>Semana ${C.w}</b>`);
     let t = `<span class="cut-tag">Corte de evaluación</span> ${parts.join(' · ')} <span class="muted">— último dato en la base: ${C.dateText}</span>`;
-    t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
+    t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.tipo ? ' · <b>' + TIPO_LABEL[F.tipo] + '</b>' : ''}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
     $('#cutBanner').innerHTML = t;
   }
 
@@ -934,6 +1001,13 @@
     ];
     if (C.hasW) cards.push(kpi(`Semana ${C.w} · ${C.y}`, money(Y.week), state.weekYears.has(C.y - 1) ? vs(Y.week, P?.week || 0) : ''));
     cards.push(kpi('Tiendas con venta', num(Y.stores.size), P ? `${num(P.stores.size)} en ${C.y - 1} (mismo corte)` : ''));
+    if (F.showShare) {
+      const sh = (G, A) => (G.ytd + A.ytd > 0 ? G.ytd / (G.ytd + A.ytd) : null);
+      const s1 = sh(Y.p, Y.c), s0 = P ? sh(P.p, P.c) : null;
+      const dpp = s1 != null && s0 != null ? s1 - s0 : null;
+      cards.push(kpi('Participación Paraíso (acum.)', s1 == null ? '—' : fmtPct.format(s1),
+        dpp == null ? `Paraíso ${money(Y.p.ytd)}` : `<span class="${dirCls(dpp)}">${dpp > 0 ? '▲' : dpp < 0 ? '▼' : ''} ${(dpp > 0 ? '+' : '') + (dpp * 100).toFixed(1)} pp</span> vs ${C.y - 1}`));
+    }
     if (best != null) cards.push(kpi('Mejor año al corte', String(best), money(R.byYear.get(best).ytd)));
     $('#kpis').innerHTML = cards.join('');
   }
@@ -966,6 +1040,28 @@
     bar('full', 'chartYearsFull', 'y2');
   }
 
+  const COL_PARAISO = '#1baf7a', COL_COMP = '#8a93a3';
+  function renderGroupChart(F, R) {
+    $('#groupLegend').innerHTML = `<span><i class="swatch" style="background:${COL_PARAISO}"></i>Venta Paraíso</span><span><i class="swatch" style="background:${COL_COMP}"></i>Venta Competencia</span>`;
+    const ds = (label, field, color) => ({ label, data: F.years.map((y) => R.byYear.get(y)[field].ytd), backgroundColor: color, borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: 0.7, barPercentage: 0.9 });
+    upsertChart('g', 'chartGroups', {
+      type: 'bar',
+      data: { labels: F.years.map(String), datasets: [ds('Venta Paraíso', 'p', COL_PARAISO), ds('Venta Competencia', 'c', COL_COMP)] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}`,
+            footer: (it) => { const Y = R.byYear.get(F.years[it[0].dataIndex]); const t = Y.p.ytd + Y.c.ytd; return t ? `Part. Paraíso: ${fmtPct.format(Y.p.ytd / t)}` : ''; },
+          } },
+        },
+        scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
+      },
+    });
+  }
+
   function renderLines(canvasId, key, F, R, labels, getter, years) {
     const legendHtml = [...years].reverse().map((y) => `<span><i class="swatch" style="background:${yearColor(y)}"></i>${y}</span>`).join('');
     $$('[data-legend]', $('#' + canvasId).closest('.card')).forEach((el) => (el.innerHTML = legendHtml));
@@ -991,11 +1087,11 @@
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
     const F = lastF, R = lastR;
-    return { years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
+    return { groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
   }
   async function copyTable(id) {
     const T = aoaFor(id);
-    const fmt = (v, t) => (v == null ? '' : t === '%' || t === 'p' ? (v * 100).toFixed(1) + '%' : t === '$' || t === 'n' ? String(Math.round(v * 100) / 100) : String(v));
+    const fmt = (v, t) => (v == null ? '' : t === 'pp' ? (v * 100).toFixed(1) + ' pp' : t === '%' || t === 'p' ? (v * 100).toFixed(1) + '%' : t === '$' || t === 'n' ? String(Math.round(v * 100) / 100) : String(v));
     const lines = [T.head, ...T.rows, ...T.foot].map((r) => r.map((v, i) => fmt(v, T.types[i])).join('\t'));
     try { await navigator.clipboard.writeText(lines.join('\n')); toast('Tabla copiada: pégala en Excel.'); }
     catch { toast('No se pudo copiar en este navegador.'); }
@@ -1010,7 +1106,7 @@
         const ce = ws[XLSX.utils.encode_cell({ r, c })];
         if (!ce || ce.t !== 'n') return;
         if (t === '$') ce.v = Math.round(ce.v * 100) / 100;
-        ce.z = t === '%' || t === 'p' ? '0.0%' : t === '$' ? '#,##0.00' : '#,##0';
+        ce.z = t === '%' || t === 'p' ? '0.0%' : t === 'pp' ? '+0.0%;-0.0%' : t === '$' ? '#,##0.00' : '#,##0';
       });
     }
     ws['!cols'] = T.head.map((h, i) => ({ wch: T.types[i] === 't' && i < 2 ? 28 : Math.max(13, String(h).length + 2) }));
@@ -1022,9 +1118,10 @@
     if (!lastR) return;
     const F = lastF, R = lastR, C = F.C;
     const corte = `Corte: ${C.y} · ${C.monthLabel}${C.hasW ? ' · Semana ' + C.w : ''} (último dato ${C.dateText})`;
-    const filt = `${corte}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
+    const filt = `${corte}${F.tipo ? ' · ' + TIPO_LABEL[F.tipo] : ''}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
+    if (F.showShare) XLSX.utils.book_append_sheet(wb, sheetFrom(groupsAOA(F, R), 'Venta Paraíso vs Competencia · ' + filt), 'Paraíso vs Competencia');
     XLSX.utils.book_append_sheet(wb, sheetFrom(monthsAOA(F, R), 'Meses × años · ' + filt), 'Por mes');
     if (C.hasW && F.years.some((y) => state.weekYears.has(y))) XLSX.utils.book_append_sheet(wb, sheetFrom(weeksAOA(F, R), 'Semanas × años · ' + filt), 'Por semana');
     XLSX.utils.book_append_sheet(wb, sheetFrom(entityAOA(F, R, 'chains'), `Cadenas · ${MEASURES[F.measure]} · ` + filt), 'Por cadena');
@@ -1105,7 +1202,7 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
-    ['#fFrom', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
+    ['#fFrom', '#fTipo', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
     let tSearch;
     $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(renderStores, 150); });
     $('#fStatus').addEventListener('change', renderStores);
