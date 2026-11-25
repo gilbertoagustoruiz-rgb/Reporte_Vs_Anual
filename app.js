@@ -743,7 +743,8 @@
     };
     const ys = state.years;
     const prev = $('#fFrom').value;
-    const def = prev && ys.includes(+prev) ? +prev : (ys.find((y) => y >= 2022) ?? ys[0]);
+    const auto = ys.find((y) => y >= 2022) ?? ys[0];
+    const def = state.fromTouched && prev && ys.includes(+prev) ? +prev : auto;
     setOpts($('#fFrom'), ys.map((y) => [y, y]), def);
 
     const chains = [...new Set(state.records.map((r) => r.cadena))].sort((a, b) => a.localeCompare(b, 'es'));
@@ -1060,9 +1061,14 @@
     // Años a comparar (por defecto el año del corte contra el anterior).
     const years = [...new Set(data.map((r) => r.y))].sort((a, b) => a - b);
     const selB = $('#cmpYearB'), selA = $('#cmpYearA');
+    const yearsKey = years.join(',');
+    if (cmp.yearsKey !== yearsKey) {
+      const keepB = cmp.init && years.includes(+selB.value) ? +selB.value : null, keepA = cmp.init && years.includes(+selA.value) ? +selA.value : null;
+      selB.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selB.value = keepB ?? (years.includes(C.y) ? C.y : years[years.length - 1]);
+      selA.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selA.value = keepA ?? (years.includes(+selB.value - 1) ? +selB.value - 1 : years[0]);
+      cmp.yearsKey = yearsKey;
+    }
     if (!cmp.init) {
-      selB.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selB.value = years.includes(C.y) ? C.y : years[years.length - 1];
-      selA.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selA.value = years.includes(+selB.value - 1) ? +selB.value - 1 : years[0];
       // Por defecto: el mes de corte, hasta el día de corte (comparación pareja con el año anterior).
       cmp.months = new Set([C.m]);
       cmp.days = new Set(C.d ? Array.from({ length: C.d }, (_, i) => i + 1) : []);
@@ -1356,6 +1362,7 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
+    $('#fFrom').addEventListener('change', () => { state.fromTouched = true; });
     ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', renderAll));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
