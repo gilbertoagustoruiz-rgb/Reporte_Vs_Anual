@@ -1,26 +1,39 @@
 # Reporte Vs Anual
 
-App web para comparar ventas **año contra año** a partir de archivos de Excel o CSV. Parte de la idea de *Reporte 30K Paraíso*, pero muestra el informe completo, sin filtrar por el umbral de 30K: subes tus archivos, la app detecta las columnas sola y te da el comparativo por cadena, mes y tienda.
+App web para **evaluar las ventas de todos los años** (por defecto desde 2022) a partir de archivos de Excel o CSV. Subes los archivos y la app detecta las columnas sola. El corte de evaluación se toma siempre de **la fecha más reciente que haya en los archivos**: el último año, mes y semana con venta.
 
-## Qué hace
+Publicada en: https://reporte-vs-anual.onrender.com
 
-- **Sube varios archivos a la vez**: `.xlsx`, `.xls`, `.xlsm`, `.xlsb` y `.csv`/`.txt`. Por ejemplo, un archivo por año (2025 y 2026) o uno solo con todo.
+## Lectura de archivos
+
+- **Sube varios a la vez**: `.xlsx`, `.xls`, `.xlsm`, `.xlsb` y `.csv`/`.txt`. Puede ser un archivo por año o uno solo con todos.
 - **Los archivos no salen de tu equipo**: todo se procesa en el navegador.
-- **Detecta las columnas automáticamente**: Venta, Fecha (o Año + Mes), Cadena, Tienda/PDV, Marca y Unidades. Si alguna sale mal, la cambias en la lista y todo se recalcula. La app recuerda tu elección para archivos con los mismos encabezados.
-- **Encuentra la fila de encabezados** aunque el archivo tenga títulos arriba, y elige la hoja correcta del libro.
-- **Formato ancho**: también lee reportes con los meses como columnas (`Ene-25`, `2025-01` o fechas en el encabezado). Las filas de TOTAL se omiten.
-- **CSV**: detecta el separador (`;`, `,`, tabulación o `|`), la codificación (UTF-8 o Windows-1252) y los formatos `1,234.56` y `1.234,56`. Las fechas se leen como día/mes/año.
+- **Detecta las columnas automáticamente**: Venta, Fecha (o Año + Mes, o Año + Semana), Semana, Cadena, Tienda/PDV, Marca y Unidades. Si alguna sale mal, la cambias en la lista y la app recuerda tu elección.
+- **Encuentra la fila de encabezados** aunque haya títulos arriba, y elige la hoja correcta del libro.
+- También lee reportes en **formato ancho** (los meses como columnas). Las filas de TOTAL se omiten.
+- **CSV**: detecta el separador y la codificación, y acepta los formatos `1,234.56` y `1.234,56`. Las fechas se leen como día/mes/año.
 
-### Comparativo
+## Corte de evaluación
 
-- Eliges el **año base** y el **año a comparar**.
-- **Período**: *Mismos meses (YTD)*, que es la opción por defecto y compara solo los meses que ya tienen venta en el año actual; *Año completo*; o un *Rango de meses*.
-- Filtros por **cadena** y **marca**.
-- Muestra **el informe completo**: todas las cadenas, todos los meses del período y todas las tiendas. No hay umbral ni corte por monto.
-- Indicadores: venta de cada año, variación en S/ y en %, tiendas que crecen o caen, y tiendas nuevas o sin venta.
-- Gráficos: venta mensual de un año frente al otro y variación % de todas las cadenas.
-- Tablas: resumen por cadena, detalle mensual y **detalle por tienda**. Esta última tiene búsqueda, filtro por estado, orden por columna y, si quieres, las columnas de cada mes.
-- **Descargar Excel** (hojas Resumen, Por cadena, Mensual y Por tienda) y **Copiar tabla** para pegarla en Excel.
+Se calcula solo, a partir del dato más reciente en los archivos. Ejemplo: último dato el 21/11/2026 → corte **2026 · noviembre · semana 47**. Con ese corte, cada año se mide de cuatro formas:
+
+| Medida | Qué suma |
+|---|---|
+| **Acumulado al corte** | Desde la semana 1 hasta la semana del corte (o de enero al mes del corte, si el archivo no trae fecha diaria). Es la comparación justa entre años |
+| **Año completo** | Todo el año. En el año en curso llega solo hasta el corte |
+| **Mes de corte** | Solo el mes del corte, en cada año |
+| **Semana de corte** | Solo la semana del corte, en cada año |
+
+Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero.
+
+## Pestañas
+
+- **Por año**: indicadores del año en curso frente al anterior (acumulado, mes de corte y semana de corte), gráficos por año y una tabla con todos los años, cada uno con su variación contra el año anterior.
+- **Por mes**: gráfico de líneas con un año por línea y la tabla de meses × años, más la variación del último año contra el anterior.
+- **Por semana**: lo mismo, semana por semana.
+- **Por cadena** y **Por tienda**: todos los años en columnas, con la medida que elijas, la variación del último año contra el anterior, el estado (crece, cae, nueva o sin venta) y la participación. Las columnas se ordenan con un clic y las tiendas se pueden buscar.
+- Filtros: **desde el año**, **cadena** y **marca**.
+- **Descargar Excel**: un libro con las hojas Por año, Por mes, Por semana, Por cadena y Por tienda. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
 ## Cómo usarla en tu computadora
 
@@ -47,6 +60,6 @@ Otra forma: **New → Static Site**, con *Build command* vacío y *Publish direc
 |---|---|
 | `index.html` | Estructura de la app |
 | `styles.css` | Diseño |
-| `app.js` | Lectura de archivos, detección de columnas, cálculos, gráficos y exportación |
+| `app.js` | Lectura de archivos, detección de columnas, corte de evaluación, cálculos, gráficos y exportación |
 | `vendor/` | Copias locales de SheetJS (lector de Excel) y Chart.js. SheetJS se intenta cargar primero en su versión más reciente desde su CDN oficial |
 | `render.yaml` | Configuración para publicar en Render |

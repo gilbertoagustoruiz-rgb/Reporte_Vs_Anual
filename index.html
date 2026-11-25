@@ -12,13 +12,16 @@
       <span class="logo">VS</span>
       <div>
         <h1>Reporte Vs Anual</h1>
-        <p class="sub">Comparativo de ventas año contra año · Below Trade</p>
+        <p class="sub">Evaluación de ventas por año · Below Trade</p>
       </div>
     </div>
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="datos" role="tab">Datos del reporte</button>
-      <button class="tab" data-view="comparativo" role="tab">Comparativo</button>
-      <button class="tab" data-view="detalle" role="tab">Detalle por tienda</button>
+      <button class="tab active" data-view="datos" role="tab">Datos</button>
+      <button class="tab" data-view="anual" role="tab">Por año</button>
+      <button class="tab" data-view="mensual" role="tab">Por mes</button>
+      <button class="tab" data-view="semanal" role="tab">Por semana</button>
+      <button class="tab" data-view="cadena" role="tab">Por cadena</button>
+      <button class="tab" data-view="tienda" role="tab">Por tienda</button>
     </nav>
     <label class="btn btn-primary upload-btn">
       Subir archivos
@@ -32,7 +35,7 @@
       <div id="dropzone" class="dropzone">
         <div class="dz-icon">⬆</div>
         <p class="dz-title">Arrastra aquí tus archivos de ventas</p>
-        <p class="dz-hint">Excel (.xlsx, .xls, .xlsm), Excel binario (.xlsb) o CSV · puedes subir varios a la vez (por ejemplo, 2025 y 2026)</p>
+        <p class="dz-hint">Excel (.xlsx, .xls, .xlsm), Excel binario (.xlsb) o CSV · puedes subir varios a la vez (por ejemplo, uno por año desde 2022)</p>
         <label class="btn btn-primary">
           Elegir archivos
           <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
@@ -47,7 +50,7 @@
           <h2>Archivos cargados</h2>
           <div class="actions">
             <button class="btn" id="btnClear">Quitar todos</button>
-            <button class="btn btn-primary" id="btnGoCompare">Ver comparativo →</button>
+            <button class="btn btn-primary" id="btnGoCompare">Ver evaluación →</button>
           </div>
         </div>
         <p class="muted small">Revisa que cada columna esté bien detectada. Si algo no cuadra, cámbialo en la lista y se recalcula al momento.</p>
@@ -55,90 +58,102 @@
       </div>
     </section>
 
-    <!-- ============ COMPARATIVO ============ -->
-    <section id="view-comparativo" class="view">
-      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos del reporte</b> para ver el comparativo.</div>
+    <!-- ============ BARRA COMÚN DE ANÁLISIS ============ -->
+    <div id="analysis" hidden>
+      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos</b> para ver la evaluación.</div>
       <div data-content hidden>
-        <div class="filters card" id="filters">
-          <div class="f"><label>Año base</label><select id="fYearA"></select></div>
-          <div class="f"><label>Año a comparar</label><select id="fYearB"></select></div>
-          <div class="f"><label>Período</label>
-            <select id="fPeriod">
-              <option value="ytd">Mismos meses (YTD)</option>
-              <option value="full">Año completo</option>
-              <option value="custom">Rango de meses</option>
-            </select>
-          </div>
-          <div class="f" id="fRangeWrap" hidden><label>Meses</label>
-            <div class="range"><select id="fMonthFrom"></select><span>a</span><select id="fMonthTo"></select></div>
-          </div>
+        <div class="cut-banner" id="cutBanner"></div>
+        <div class="filters card">
+          <div class="f"><label>Desde el año</label><select id="fFrom"></select></div>
           <div class="f"><label>Cadena</label><select id="fChain"></select></div>
           <div class="f" id="fBrandWrap"><label>Marca</label><select id="fBrand"></select></div>
-        </div>
-        <p class="period-note" id="periodNote"></p>
-
-        <div class="kpis" id="kpis"></div>
-
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head"><h2>Venta mensual</h2><span class="legend" id="chartLegend"></span></div>
-            <div class="chart-box"><canvas id="chartMonthly" aria-label="Venta mensual año base vs año a comparar" role="img"></canvas></div>
+          <div class="f" id="fMeasureWrap"><label>Medida</label>
+            <select id="fMeasure">
+              <option value="ytd">Acumulado al corte</option>
+              <option value="full">Año completo</option>
+              <option value="month">Mes de corte</option>
+              <option value="week">Semana de corte</option>
+            </select>
           </div>
-          <div class="card">
-            <div class="card-head"><h2>Variación por cadena</h2></div>
-            <div class="chart-box"><canvas id="chartChains" aria-label="Variación porcentual por cadena" role="img"></canvas></div>
-          </div>
+          <div class="f actions-f"><button class="btn btn-primary" id="btnExport">Descargar Excel</button></div>
         </div>
+      </div>
+    </div>
 
+    <!-- ============ POR AÑO ============ -->
+    <section id="view-anual" class="view" data-analysis>
+      <div class="kpis" id="kpis"></div>
+      <div class="grid-2">
         <div class="card">
-          <div class="card-head">
-            <h2>Resumen por cadena</h2>
-            <div class="actions"><button class="btn" data-copy="tblChains">Copiar tabla</button></div>
-          </div>
-          <div class="table-wrap"><table id="tblChains" class="tbl"></table></div>
+          <div class="card-head"><h2 id="ttlYtdChart">Acumulado al corte por año</h2></div>
+          <div class="chart-box"><canvas id="chartYears" role="img" aria-label="Venta acumulada al corte por año"></canvas></div>
         </div>
-
         <div class="card">
-          <div class="card-head">
-            <h2>Detalle mensual</h2>
-            <div class="actions"><button class="btn" data-copy="tblMonths">Copiar tabla</button></div>
-          </div>
-          <div class="table-wrap"><table id="tblMonths" class="tbl"></table></div>
+          <div class="card-head"><h2>Año completo por año</h2></div>
+          <div class="chart-box"><canvas id="chartYearsFull" role="img" aria-label="Venta de año completo por año"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Evaluación por año</h2><div class="actions"><button class="btn" data-copy="years">Copiar tabla</button></div></div>
+        <div class="table-wrap"><table id="tblYears" class="tbl"></table></div>
+        <p class="note" id="noteYears"></p>
+      </div>
+    </section>
+
+    <!-- ============ POR MES ============ -->
+    <section id="view-mensual" class="view" data-analysis>
+      <div class="card">
+        <div class="card-head"><h2>Venta mensual por año</h2><span class="legend" data-legend></span></div>
+        <div class="chart-box tall"><canvas id="chartMonths" role="img" aria-label="Venta mensual por año"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Meses × años</h2><div class="actions"><button class="btn" data-copy="months">Copiar tabla</button></div></div>
+        <div class="table-wrap"><table id="tblMonths" class="tbl"></table></div>
+        <p class="note" id="noteMonths"></p>
+      </div>
+    </section>
+
+    <!-- ============ POR SEMANA ============ -->
+    <section id="view-semanal" class="view" data-analysis>
+      <div class="empty-state" id="noWeeks" hidden>Los archivos cargados no tienen fecha diaria ni columna de semana, así que no se puede armar la vista semanal.</div>
+      <div id="weeksContent">
+        <div class="card">
+          <div class="card-head"><h2>Venta semanal por año</h2><span class="legend" data-legend></span></div>
+          <div class="chart-box tall"><canvas id="chartWeeks" role="img" aria-label="Venta semanal por año"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Semanas × años</h2><div class="actions"><button class="btn" data-copy="weeks">Copiar tabla</button></div></div>
+          <div class="table-wrap tall"><table id="tblWeeks" class="tbl"></table></div>
+          <p class="note">Semanas de lunes a domingo; la semana 1 es la que contiene el 1 de enero.</p>
         </div>
       </div>
     </section>
 
-    <!-- ============ DETALLE ============ -->
-    <section id="view-detalle" class="view">
-      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos del reporte</b> para ver el detalle.</div>
-      <div data-content hidden>
-        <div class="filters card">
-          <div class="f grow"><label>Buscar tienda</label><input type="search" id="fSearch" placeholder="Nombre o código de tienda…"></div>
-          <div class="f"><label>Estado</label>
-            <select id="fStatus">
-              <option value="">Todos</option>
-              <option value="crece">▲ Crece</option>
-              <option value="cae">▼ Cae</option>
-              <option value="nueva">● Nueva (sin venta en año base)</option>
-              <option value="perdida">✕ Sin venta en año a comparar</option>
-            </select>
-          </div>
-          <div class="f"><label>Columnas</label>
-            <select id="fMonthCols">
-              <option value="no">Solo totales</option>
-              <option value="yes">Totales + meses del año a comparar</option>
-            </select>
-          </div>
-          <div class="f actions-f">
-            <button class="btn" data-copy="tblStores">Copiar tabla</button>
-            <button class="btn btn-primary" id="btnExport">Descargar Excel</button>
-          </div>
+    <!-- ============ POR CADENA ============ -->
+    <section id="view-cadena" class="view" data-analysis>
+      <div class="card">
+        <div class="card-head"><h2>Cadenas por año <span class="count" id="chainMeasure"></span></h2><div class="actions"><button class="btn" data-copy="chains">Copiar tabla</button></div></div>
+        <div class="table-wrap tall"><table id="tblChains" class="tbl sortable"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ POR TIENDA ============ -->
+    <section id="view-tienda" class="view" data-analysis>
+      <div class="filters card">
+        <div class="f grow"><label>Buscar tienda</label><input type="search" id="fSearch" placeholder="Nombre de tienda o cadena…"></div>
+        <div class="f"><label>Estado (último año vs anterior)</label>
+          <select id="fStatus">
+            <option value="">Todos</option>
+            <option value="crece">▲ Crece</option>
+            <option value="cae">▼ Cae</option>
+            <option value="nueva">● Nueva</option>
+            <option value="perdida">✕ Sin venta en el último año</option>
+          </select>
         </div>
-        <p class="period-note" id="periodNote2"></p>
-        <div class="card">
-          <div class="card-head"><h2>Tiendas <span class="count" id="storeCount"></span></h2></div>
-          <div class="table-wrap tall"><table id="tblStores" class="tbl sortable"></table></div>
-        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Tiendas por año <span class="count" id="storeCount"></span></h2><div class="actions"><button class="btn" data-copy="stores">Copiar tabla</button></div></div>
+        <div class="table-wrap tall"><table id="tblStores" class="tbl sortable"></table></div>
       </div>
     </section>
   </main>

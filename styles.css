@@ -146,6 +146,17 @@ select, input[type="number"], input[type="search"] {
 
 /* ---------- Charts ---------- */
 .chart-box { position: relative; height: 300px; }
+.chart-box.tall { height: 360px; }
+.note { color: var(--text-2); font-size: 12.5px; margin: 10px 0 0; }
+.note:empty { display: none; }
+.cut-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  background: #0f2a4a0d; border: 1px solid #c9d6e8; border-left: 4px solid var(--accent);
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px;
+}
+.cut-tag { background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: .3px; }
+.cut-years { flex-basis: 100%; font-size: 12.5px; color: var(--text-2); }
+.kpi .k-sub span { font-weight: 600; }
 .legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 

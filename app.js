@@ -74,7 +74,26 @@
   }
 
   function fixYear(y) { y = +y; return y < 100 ? 2000 + y : y; }
-  function okYM(y, m) { return y >= 1990 && y <= 2100 && m >= 1 && m <= 12 ? { y, m } : null; }
+  function okYM(y, m, d = null) {
+    if (!(y >= 1990 && y <= 2100 && m >= 1 && m <= 12)) return null;
+    d = d == null ? null : +d;
+    if (d != null && !(d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate())) d = null;
+    return { y, m, d };
+  }
+
+  /** Semana del año: semanas de lunes a domingo; la semana 1 es la que contiene el 1 de enero. */
+  function weekOf(y, m, d) {
+    const doy = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 864e5) + 1;
+    const wd = (new Date(Date.UTC(y, 0, 1)).getUTCDay() + 6) % 7;
+    return Math.floor((doy - 1 + wd) / 7) + 1;
+  }
+
+  function parseWeek(v) {
+    if (v == null || v === '') return null;
+    const m = String(v).match(/(\d{1,2})\s*$/) || String(v).match(/(\d{1,2})/);
+    const n = m ? +m[1] : null;
+    return n >= 1 && n <= 54 ? n : null;
+  }
 
   function monthWord(w) { return MONTH_WORDS[norm(w).replace(/\s/g, '')] || MONTH_WORDS[norm(w).slice(0, 3)] || null; }
 
@@ -84,25 +103,25 @@
     if (v instanceof Date) {
       if (isNaN(v)) return null;
       const d = new Date(v.getTime() + 12 * 3600e3); // evita desfases de zona horaria en fechas de Excel
-      return okYM(d.getFullYear(), d.getMonth() + 1);
+      return okYM(d.getFullYear(), d.getMonth() + 1, d.getDate());
     }
     if (typeof v === 'number') {
       if (v >= 199001 && v <= 210012 && v % 100 >= 1 && v % 100 <= 12) return okYM(Math.floor(v / 100), v % 100); // aaaamm
-      if (v >= 19900101 && v <= 21001231) return okYM(Math.floor(v / 10000), Math.floor(v / 100) % 100); // aaaammdd
-      if (v > 20000 && v < 80000) { const p = XLSX.SSF.parse_date_code(v); return p ? okYM(p.y, p.m) : null; } // serial Excel
+      if (v >= 19900101 && v <= 21001231) return okYM(Math.floor(v / 10000), Math.floor(v / 100) % 100, v % 100); // aaaammdd
+      if (v > 20000 && v < 80000) { const p = XLSX.SSF.parse_date_code(v); return p ? okYM(p.y, p.m, p.d) : null; } // serial Excel
       return null;
     }
     const s = String(v).trim();
     let m;
-    if ((m = s.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?(?:[ T].*)?$/))) return okYM(+m[1], +m[2]);
+    if ((m = s.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?(?:[ T].*)?$/))) return okYM(+m[1], +m[2], m[3]);
     if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:[ T].*)?$/))) {
       let a = +m[1], b = +m[2];
       // Perú: día/mes/año. Si el segundo número no puede ser mes, se asume mes/día/año.
       const mo = b <= 12 ? b : a;
-      return okYM(fixYear(m[3]), mo);
+      return okYM(fixYear(m[3]), mo, b <= 12 ? a : b);
     }
     if ((m = s.match(/^(\d{1,2})[-/.](\d{4})$/))) return okYM(+m[2], +m[1]);
-    if ((m = s.match(/^(\d{4})(\d{2})(\d{2})?$/))) return okYM(+m[1], +m[2]);
+    if ((m = s.match(/^(\d{4})(\d{2})(\d{2})?$/))) return okYM(+m[1], +m[2], m[3]);
     if ((m = s.match(/^([a-zA-ZáéíóúÁÉÍÓÚ.]+)[\s\-/.]*(?:de[\s]+|del[\s]+)?(\d{2,4})$/))) {
       const mo = monthWord(m[1]); return mo ? okYM(fixYear(m[2]), mo) : null;
     }
@@ -110,7 +129,7 @@
       const mo = monthWord(m[2]); return mo ? okYM(+m[1], mo) : null;
     }
     if ((m = s.match(/^(\d{1,2})\s+de\s+([a-zA-ZáéíóúÁÉÍÓÚ]+)(?:\s+(?:de|del)\s+(\d{2,4}))?$/i))) {
-      const mo = monthWord(m[2]); return mo && m[3] ? okYM(fixYear(m[3]), mo) : null;
+      const mo = monthWord(m[2]); return mo && m[3] ? okYM(fixYear(m[3]), mo, m[1]) : null;
     }
     return null;
   }
@@ -142,6 +161,7 @@
     { key: 'fecha', label: 'Fecha' },
     { key: 'anio', label: 'Año' },
     { key: 'mes', label: 'Mes' },
+    { key: 'semana', label: 'Semana' },
     { key: 'cadena', label: 'Cadena' },
     { key: 'tienda', label: 'Tienda / PDV' },
     { key: 'marca', label: 'Marca' },
@@ -152,7 +172,8 @@
     venta: { pats: [/^(venta|ventas|venta s|venta soles|venta neta|venta total|venta valor|sell out|sellout|venta pen|monto venta|importe venta)$/, /\bventa|sell ?out|\bsoles\b/, /\b(monto|importe|valor|total|neto|facturacion)\b/], not: /cant|unid|\bund|qty|cuota|meta|objetivo|ppto|presupuesto|precio|costo|margen|%|porc|var|cod|fecha|mes|ano/ },
     fecha: { pats: [/^(fecha|fecha venta|fecha de venta|fec venta|date|dia)$/, /\bfecha|\bdate\b|\bfec\b/], not: /registro|carga|actualiz|creacion|nacim|ingreso|alta/ },
     anio: { pats: [/^(ano|anio|year|periodo ano|ano venta)$/, /\bano\b|\banio\b|\byear\b/], not: /mes|fecha/ },
-    mes: { pats: [/^(mes|month|mes venta|nombre mes|mes nombre)$/, /\bmes\b|\bmonth\b|\bperiodo\b/], not: /fecha|ano/ },
+    mes: { pats: [/^(mes|month|mes venta|nombre mes|mes nombre)$/, /\bmes\b|\bmonth\b|\bperiodo\b/], not: /fecha|ano|semana/ },
+    semana: { pats: [/^(semana|sem|week|wk|nro semana|n semana|semana venta)$/, /\bsemana\b|\bweek\b|\bsem\b/], not: /fecha|dia/ },
     cadena: { pats: [/^(cadena|cadena comercial|retail|cliente|razon social|chain)$/, /\bcadena|\bretail\b|\bcliente\b|\bchain\b|\bcanal\b/], not: /cod|id\b|ruc/ },
     tienda: { pats: [/^(tienda|pdv|punto de venta|local|sucursal|store|nombre tienda|nombre pdv|nombre local|desc tienda|descripcion tienda|tienda nombre)$/, /\b(tienda|pdv|punto de venta|local|sucursal|store)\b/], not: /\bcod|codigo|\bid\b|cadena/ },
     marca: { pats: [/^(marca|brand)$/, /\bmarca\b|\bbrand\b/], not: /cod/ },
@@ -193,7 +214,7 @@
     const used = new Set();
     const map = {};
     const hn = headers.map(norm);
-    for (const role of ['venta', 'fecha', 'anio', 'mes', 'cadena', 'tienda', 'marca', 'unidades']) {
+    for (const role of ['venta', 'fecha', 'anio', 'semana', 'mes', 'cadena', 'tienda', 'marca', 'unidades']) {
       const r = RULES[role];
       let found = -1;
       for (const p of r.pats) {
@@ -298,6 +319,7 @@
     let used = 0, noDate = 0, noAmt = 0;
     const years = new Set();
     let total = 0;
+    let maxStamp = 0, maxDate = null;
     const wide = mp.venta == null ? detectWideColumns(f.headers, mp) : [];
     f.wide = wide.length >= 2;
     f.error = null;
@@ -311,11 +333,15 @@
     if (!f.error) {
       const val = (r, k) => (mp[k] == null ? null : r[mp[k]]);
       const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
-      const add = (cad, tie, mar, y, m, v, u) => {
-        const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m;
+      const add = (cad, tie, mar, y, m, w, v, u, d = null) => {
+        const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0);
         const cur = agg.get(key);
         if (cur) { cur.v += v; cur.u += u; } else agg.set(key, { v, u });
         years.add(y); total += v; used++;
+        if (v) {
+          const stamp = y * 10000 + m * 100 + (d || 0);
+          if (stamp > maxStamp) { maxStamp = stamp; maxDate = { y, m, d, w: w || 0 }; }
+        }
       };
       for (const r of rows) {
         if (!r) continue;
@@ -329,7 +355,7 @@
           for (const c of wide) {
             const v = parseAmount(r[c.i]);
             if (v == null || v === 0) continue;
-            add(cad, tie, mar, c.y, c.m, v, 0);
+            add(cad, tie, mar, c.y, c.m, 0, v, 0);
           }
           continue;
         }
@@ -340,13 +366,20 @@
         if (!ym && mp.anio != null) {
           const y = parseYear(val(r, 'anio'));
           const m = mp.mes != null ? parseMonth(val(r, 'mes')) : null;
-          if (y && m) ym = { y, m };
+          if (y && m) ym = { y, m, d: null };
         }
         if (!ym && mp.mes != null) ym = parseYM(val(r, 'mes'));
+        if (ym && mp.semana != null && mp.anio != null && mp.mes == null && mp.fecha == null) ym = null;
+        if (!ym && mp.anio != null && mp.semana != null) {
+          const y = parseYear(val(r, 'anio')), w = parseWeek(val(r, 'semana'));
+          if (y && w) { const wd = (new Date(Date.UTC(y, 0, 1)).getUTCDay() + 6) % 7; const dt = new Date(Date.UTC(y, 0, 1 + (w - 1) * 7 - wd + 3)); ym = { y, m: dt.getUTCFullYear() === y ? dt.getUTCMonth() + 1 : (w < 10 ? 1 : 12), d: null }; }
+        }
         if (!ym) { noDate++; continue; }
         if (/^(total|sub ?total|gran total)\b/.test(norm(tie)) || /^(total|sub ?total|gran total)\b/.test(norm(cad))) continue;
         const u = mp.unidades != null ? parseAmount(val(r, 'unidades')) || 0 : 0;
-        add(cad, tie, mar, ym.y, ym.m, v, u);
+        let w = ym.d ? weekOf(ym.y, ym.m, ym.d) : 0;
+        if (mp.semana != null) w = parseWeek(val(r, 'semana')) || w;
+        add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d);
       }
       if (!used) f.error = 'No pude leer ninguna fila con venta y fecha. Revisa la fila de encabezados y las columnas elegidas.';
       if (noDate) warnings.push(`${num(noDate)} filas sin fecha válida se omitieron.`);
@@ -354,7 +387,7 @@
       if (!f.wide && mp.tienda == null) warnings.push('No hay columna de tienda: el detalle por tienda saldrá agrupado.');
       if (f.wide && mp.anio == null && mp.mes == null && mp.fecha == null) warnings.push(`Formato ancho: ${wide.length} columnas de mes detectadas como ventas.`);
     }
-    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total });
+    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate });
   }
 
   function rebuildAll() {
@@ -372,12 +405,26 @@
     const years = new Set();
     const records = [];
     for (const [k, o] of agg) {
-      const [cadena, tienda, marca, y, m] = k.split('\u0001');
-      const rec = { cadena, tienda, marca, y: +y, m: +m, v: o.v, u: o.u };
+      const [cadena, tienda, marca, y, m, w] = k.split('\u0001');
+      const rec = { cadena, tienda, marca, y: +y, m: +m, w: +w, v: o.v, u: o.u };
       records.push(rec);
       if (o.v) years.add(rec.y);
     }
-    Object.assign(state, { records, years: [...years].sort((a, b) => a - b), hasBrand, hasStore });
+    // Corte de evaluación: siempre el último año, mes y semana con venta en los archivos.
+    let cut = null;
+    for (const f of state.files) {
+      const md = f.error ? null : f.maxDate;
+      if (!md) continue;
+      if (!cut || md.y * 10000 + md.m * 100 + (md.d || 0) > cut.y * 10000 + cut.m * 100 + (cut.d || 0)) cut = { ...md };
+    }
+    const weekYears = new Set(records.filter((r) => r.w > 0 && r.v).map((r) => r.y));
+    if (cut) {
+      // Semana de corte: la más alta con venta en el último año (si hay datos semanales).
+      const wMax = Math.max(0, ...records.filter((r) => r.y === cut.y && r.w > 0 && r.v).map((r) => r.w));
+      cut.w = wMax;
+      cut.m = Math.max(...records.filter((r) => r.y === cut.y && r.v).map((r) => r.m));
+    }
+    Object.assign(state, { records, years: [...years].sort((a, b) => a - b), hasBrand, hasStore, cut, weekYears });
     syncFilterOptions();
     renderFiles();
     renderAll();
@@ -460,62 +507,87 @@
 
   // ---------------------------------------------------------------- filtros
   function syncFilterOptions() {
-    const ys = state.years;
     const setOpts = (sel, items, val) => {
       sel.innerHTML = items.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
       if (items.some(([v]) => String(v) === String(val))) sel.value = val;
     };
-    const yA = $('#fYearA'), yB = $('#fYearB');
-    const prevB = +yB.value, prevA = +yA.value;
-    const defB = ys.includes(prevB) ? prevB : ys[ys.length - 1];
-    const defA = ys.includes(prevA) && prevA !== defB ? prevA : ys.filter((y) => y < defB).pop() ?? ys[0];
-    setOpts(yA, ys.map((y) => [y, y]), defA);
-    setOpts(yB, ys.map((y) => [y, y]), defB);
+    const ys = state.years;
+    const prev = $('#fFrom').value;
+    const def = prev && ys.includes(+prev) ? +prev : (ys.find((y) => y >= 2022) ?? ys[0]);
+    setOpts($('#fFrom'), ys.map((y) => [y, y]), def);
 
     const chains = [...new Set(state.records.map((r) => r.cadena))].sort((a, b) => a.localeCompare(b, 'es'));
     setOpts($('#fChain'), [['', 'Todas'], ...chains.map((c) => [c, c])], $('#fChain').value);
     const brands = [...new Set(state.records.map((r) => r.marca).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
     setOpts($('#fBrand'), [['', 'Todas'], ...brands.map((c) => [c, c])], $('#fBrand').value);
     $('#fBrandWrap').hidden = !brands.length;
+    const weekOpt = $('#fMeasure option[value="week"]');
+    weekOpt.disabled = !(state.cut && state.cut.w);
+    if (weekOpt.disabled && $('#fMeasure').value === 'week') $('#fMeasure').value = 'ytd';
+  }
 
-    if (!$('#fMonthFrom').options.length) {
-      setOpts($('#fMonthFrom'), MESES_LARGO.map((m, i) => [i + 1, m]), 1);
-      setOpts($('#fMonthTo'), MESES_LARGO.map((m, i) => [i + 1, m]), 12);
-    }
+  // ---------------------------------------------------------------- colores por año
+  // El último año va en azul y el anterior en naranja; cada año conserva su color en toda la app.
+  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+  const yearColor = (y) => {
+    const i = [...state.years].reverse().indexOf(y);
+    return i < 0 ? '#9aa1ad' : i < PALETTE.length ? PALETTE[i] : '#9aa1ad';
+  };
+
+  // ---------------------------------------------------------------- cálculos
+  const MEASURES = { ytd: 'Acumulado al corte', full: 'Año completo', month: 'Mes de corte', week: 'Semana de corte' };
+
+  function cutInfo() {
+    const c = state.cut;
+    const hasW = !!c.w;
+    return {
+      ...c, hasW,
+      ytdLabel: (y) => (hasW && state.weekYears.has(y) ? `Sem 1–${c.w}` : `Ene–${MESES[c.m - 1]}`),
+      monthLabel: MESES_LARGO[c.m - 1],
+      dateText: c.d ? `${String(c.d).padStart(2, '0')}/${String(c.m).padStart(2, '0')}/${c.y}` : `${MESES_LARGO[c.m - 1]} ${c.y}`,
+    };
   }
 
   function currentFilters() {
-    const yearA = +$('#fYearA').value, yearB = +$('#fYearB').value;
+    const C = cutInfo();
+    const from = +$('#fFrom').value || state.years[0];
+    const years = state.years.filter((y) => y >= from && y <= C.y);
     const chain = $('#fChain').value, brand = $('#fBrand').value;
-    const base = state.records.filter((r) => (!chain || r.cadena === chain) && (!brand || r.marca === brand));
-    const period = $('#fPeriod').value;
-    let months;
-    if (period === 'full') months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    else if (period === 'custom') {
-      const a = +$('#fMonthFrom').value, b = +$('#fMonthTo').value;
-      const lo = Math.min(a, b), hi = Math.max(a, b);
-      months = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
-    } else {
-      const lastB = Math.max(0, ...base.filter((r) => r.y === yearB && r.v).map((r) => r.m));
-      const lastA = Math.max(0, ...base.filter((r) => r.y === yearA && r.v).map((r) => r.m));
-      const last = lastB || lastA || 12;
-      months = Array.from({ length: last }, (_, i) => i + 1);
+    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand));
+    return { C, from, years, chain, brand, recs, measure: $('#fMeasure').value };
+  }
+
+  const blank = () => ({ full: 0, ytd: 0, month: 0, week: 0 });
+
+  function compute(F) {
+    const { C } = F;
+    const inYtd = (r) => (C.hasW && state.weekYears.has(r.y) && r.w > 0 ? r.w <= C.w : r.m <= C.m);
+    const byYear = new Map(F.years.map((y) => [y, { ...blank(), u: 0, stores: new Set(), storesFull: new Set() }]));
+    const byYM = new Map(), byYW = new Map();
+    const byChain = new Map(), byStore = new Map();
+    let maxW = 0;
+    for (const r of F.recs) {
+      const Y = byYear.get(r.y);
+      if (!Y) continue;
+      const ytd = inYtd(r), mo = r.m === C.m, wk = C.hasW && r.w === C.w;
+      const sk = r.cadena + '\u0001' + r.tienda;
+      Y.full += r.v; if (r.v) Y.storesFull.add(sk);
+      if (ytd) { Y.ytd += r.v; Y.u += r.u; if (r.v) Y.stores.add(sk); }
+      if (mo) Y.month += r.v;
+      if (wk) Y.week += r.v;
+      byYM.set(r.y * 100 + r.m, (byYM.get(r.y * 100 + r.m) || 0) + r.v);
+      if (r.w > 0) { byYW.set(r.y * 100 + r.w, (byYW.get(r.y * 100 + r.w) || 0) + r.v); if (r.v) maxW = Math.max(maxW, r.w); }
+      for (const [map, key, base] of [[byChain, r.cadena, { cadena: r.cadena }], [byStore, sk, { cadena: r.cadena, tienda: r.tienda }]]) {
+        let o = map.get(key);
+        if (!o) map.set(key, (o = { ...base, y: {} }));
+        const oy = o.y[r.y] || (o.y[r.y] = blank());
+        oy.full += r.v; if (ytd) oy.ytd += r.v; if (mo) oy.month += r.v; if (wk) oy.week += r.v;
+      }
     }
-    const mset = new Set(months);
-    const recs = base.filter((r) => (r.y === yearA || r.y === yearB) && mset.has(r.m));
-    return { yearA, yearB, chain, brand, period, months, recs };
+    return { byYear, byYM, byYW, byChain, byStore, maxW };
   }
 
-  function periodText(F) {
-    const span = F.months.length === 12 ? 'Ene–Dic' : F.months.length === 1 ? MESES[F.months[0] - 1] : `${MESES[F.months[0] - 1]}–${MESES[F.months[F.months.length - 1] - 1]}`;
-    let t = `Comparando <b>${span} ${F.yearB}</b> contra <b>${span} ${F.yearA}</b>`;
-    if (F.chain) t += ` · Cadena: <b>${esc(F.chain)}</b>`;
-    if (F.brand) t += ` · Marca: <b>${esc(F.brand)}</b>`;
-    if (F.yearA === F.yearB) t += ' · <span class="down">Elige dos años distintos</span>';
-    return t;
-  }
-
-  // ---------------------------------------------------------------- cálculos
+  const varPct = (b, a) => (a > 0 ? (b - a) / a : null);
   function statusOf(a, b) {
     if (a <= 0 && b > 0) return 'nueva';
     if (a > 0 && b <= 0) return 'perdida';
@@ -525,287 +597,312 @@
   }
   const STATUS_LABEL = { crece: '▲ Crece', cae: '▼ Cae', nueva: '● Nueva', perdida: '✕ Sin venta', igual: '= Igual' };
 
-  function compute(F) {
-    const byMonth = new Map(F.months.map((m) => [m, { a: 0, b: 0 }]));
-    const byChain = new Map();
-    const byStore = new Map();
-    let A = 0, B = 0, uA = 0, uB = 0;
-    for (const r of F.recs) {
-      const isB = r.y === F.yearB;
-      const isA = r.y === F.yearA;
-      const mo = byMonth.get(r.m);
-      let c = byChain.get(r.cadena);
-      if (!c) byChain.set(r.cadena, (c = { cadena: r.cadena, a: 0, b: 0 }));
-      const sk = r.cadena + '\u0001' + r.tienda;
-      let s = byStore.get(sk);
-      if (!s) byStore.set(sk, (s = { cadena: r.cadena, tienda: r.tienda, a: 0, b: 0, mb: {} }));
-      if (isB) { B += r.v; uB += r.u; mo.b += r.v; c.b += r.v; s.b += r.v; s.mb[r.m] = (s.mb[r.m] || 0) + r.v; }
-      if (isA && F.yearA !== F.yearB) { A += r.v; uA += r.u; mo.a += r.v; c.a += r.v; s.a += r.v; }
-      else if (isA) { A += r.v; mo.a += r.v; c.a += r.v; s.a += r.v; }
-    }
-    const stores = [...byStore.values()].map((s) => {
-      const st = statusOf(s.a, s.b);
-      return { ...s, d: s.b - s.a, p: s.a > 0 ? (s.b - s.a) / s.a : null, st };
+  // ---------------------------------------------------------------- tablas (datos reutilizados para copiar y exportar)
+  // types: t texto · $ soles · % variación con signo · p porcentaje · n número
+  function yearsAOA(F, R) {
+    const { C } = F;
+    const head = ['Año', 'Año completo', 'Var %', `Acumulado al corte`, 'Var S/', 'Var %', `Mes de corte (${MESES[C.m - 1]})`, 'Var %'];
+    const types = ['t', '$', '%', '$', '$', '%', '$', '%'];
+    if (C.hasW) { head.push(`Semana ${C.w}`, 'Var %'); types.push('$', '%'); }
+    head.push('Tiendas con venta (acum.)', 'Período acumulado');
+    types.push('n', 't');
+    const rows = F.years.map((y) => {
+      const Y = R.byYear.get(y), P = R.byYear.get(y - 1);
+      const row = [String(y) + (y === C.y ? ' *' : ''), Y.full, P && y !== C.y ? varPct(Y.full, P.full) : null, Y.ytd, P ? Y.ytd - P.ytd : null, P ? varPct(Y.ytd, P.ytd) : null, Y.month, P ? varPct(Y.month, P.month) : null];
+      if (C.hasW) row.push(state.weekYears.has(y) ? Y.week : null, P && state.weekYears.has(y) && state.weekYears.has(y - 1) ? varPct(Y.week, P.week) : null);
+      row.push(Y.stores.size, C.ytdLabel(y));
+      return row;
     });
-    const chains = [...byChain.values()].map((c) => {
-      const ss = stores.filter((s) => s.cadena === c.cadena);
-      return {
-        ...c, d: c.b - c.a, p: c.a > 0 ? (c.b - c.a) / c.a : null,
-        nA: ss.filter((s) => s.a > 0).length, nB: ss.filter((s) => s.b > 0).length,
-        up: ss.filter((s) => s.st === 'crece' || s.st === 'nueva').length,
-        down: ss.filter((s) => s.st === 'cae' || s.st === 'perdida').length,
-      };
-    }).sort((x, y) => y.b - x.b || y.a - x.a);
-    const count = (st) => stores.filter((s) => s.st === st).length;
-    return {
-      A, B, uA, uB, d: B - A, p: A > 0 ? (B - A) / A : null,
-      months: F.months.map((m) => ({ m, ...byMonth.get(m) })),
-      chains, stores,
-      nA: stores.filter((s) => s.a > 0).length, nB: stores.filter((s) => s.b > 0).length,
-      crece: count('crece'), cae: count('cae'), nueva: count('nueva'), perdida: count('perdida'),
-    };
+    return { head, rows, foot: [], types, varCols: [2, 4, 5, 7, 9] };
+  }
+
+  function monthsAOA(F, R) {
+    const { C } = F;
+    const ys = F.years, last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
+    const head = ['Mes', ...ys.map(String)];
+    const types = ['t', ...ys.map(() => '$')];
+    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, `Var % ${last} vs ${prev}`); types.push('$', '%'); }
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      const vals = ys.map((y) => (y === last && m > C.m ? null : R.byYM.get(y * 100 + m) || 0));
+      const row = [MESES_LARGO[m - 1] + (m === C.m ? ' (corte)' : ''), ...vals];
+      if (prev) {
+        const b = m > C.m ? null : R.byYM.get(last * 100 + m) || 0, a = R.byYM.get(prev * 100 + m) || 0;
+        row.push(b == null ? null : b - a, b == null ? null : varPct(b, a));
+      }
+      rows.push(row);
+    }
+    const ytdRow = ['Acumulado al corte', ...ys.map((y) => R.byYear.get(y).ytd)];
+    const fullRow = ['Año completo', ...ys.map((y) => R.byYear.get(y).full)];
+    if (prev) {
+      const a = R.byYear.get(prev), b = R.byYear.get(last);
+      ytdRow.push(b.ytd - a.ytd, varPct(b.ytd, a.ytd));
+      fullRow.push(null, null);
+    }
+    const n = head.length;
+    return { head, rows, foot: [ytdRow, fullRow], types, varCols: prev ? [n - 2, n - 1] : [] };
+  }
+
+  function weeksAOA(F, R) {
+    const { C } = F;
+    const ys = F.years.filter((y) => state.weekYears.has(y)), last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
+    const head = ['Semana', ...ys.map(String)];
+    const types = ['t', ...ys.map(() => '$')];
+    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, `Var % ${last} vs ${prev}`); types.push('$', '%'); }
+    const rows = [];
+    const maxW = Math.max(R.maxW, C.w || 0);
+    for (let w = 1; w <= maxW; w++) {
+      const row = [`Semana ${w}` + (w === C.w ? ' (corte)' : ''), ...ys.map((y) => ((y === last && w > C.w) || w > weekOf(y, 12, 31) ? null : R.byYW.get(y * 100 + w) || 0))];
+      if (prev) {
+        const b = w > C.w ? null : R.byYW.get(last * 100 + w) || 0, a = R.byYW.get(prev * 100 + w) || 0;
+        row.push(b == null ? null : b - a, b == null ? null : varPct(b, a));
+      }
+      rows.push(row);
+    }
+    const sumTo = (y, lim) => { let t = 0; for (let w = 1; w <= lim; w++) t += R.byYW.get(y * 100 + w) || 0; return t; };
+    const ytdRow = [`Acumulado sem 1–${C.w}`, ...ys.map((y) => sumTo(y, C.w))];
+    if (prev) { const b = sumTo(last, C.w), a = sumTo(prev, C.w); ytdRow.push(b - a, varPct(b, a)); }
+    const n = head.length;
+    return { head, rows, foot: [ytdRow], types, varCols: prev ? [n - 2, n - 1] : [], ys };
+  }
+
+  function entityAOA(F, R, kind) {
+    const { C, measure } = F;
+    const ys = F.years, last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
+    const isStore = kind === 'stores';
+    const list = [...(isStore ? R.byStore : R.byChain).values()];
+    const val = (o, y) => (o.y[y] ? o.y[y][measure] : 0);
+    const totLast = list.reduce((t, o) => t + val(o, last), 0);
+    let items = list.map((o) => {
+      const b = val(o, last), a = prev ? val(o, prev) : 0;
+      return { o, b, a, d: b - a, p: varPct(b, a), st: statusOf(a, b), share: totLast ? b / totLast : null };
+    }).filter((x) => ys.some((y) => val(x.o, y)));
+    if (isStore) {
+      const q = norm($('#fSearch').value), st = $('#fStatus').value;
+      if (q) items = items.filter((x) => norm(x.o.tienda).includes(q) || norm(x.o.cadena).includes(q));
+      if (st) items = items.filter((x) => x.st === st);
+    }
+    const sort = state.sort[kind];
+    const key = (x) => (sort.key === 'name' ? (isStore ? x.o.tienda : x.o.cadena) : sort.key === 'cadena' ? x.o.cadena : sort.key.startsWith('y') ? val(x.o, +sort.key.slice(1)) : x[sort.key]);
+    items.sort((x, y) => {
+      const a = key(x), b = key(y);
+      if (a == null) return 1; if (b == null) return -1;
+      return (typeof a === 'string' ? a.localeCompare(b, 'es') : a - b) * sort.dir;
+    });
+    const head = [...(isStore ? ['Cadena', 'Tienda'] : ['Cadena']), ...ys.map(String)];
+    const keys = [...(isStore ? ['cadena', 'name'] : ['name']), ...ys.map((y) => 'y' + y)];
+    const types = [...(isStore ? ['t', 't'] : ['t']), ...ys.map(() => '$')];
+    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, 'Var %', 'Estado'); keys.push('d', 'p', 'st'); types.push('$', '%', 't'); }
+    head.push(`Part. ${last}`); keys.push('share'); types.push('p');
+    const rows = items.map((x) => {
+      const r = [...(isStore ? [x.o.cadena, x.o.tienda] : [x.o.cadena]), ...ys.map((y) => val(x.o, y))];
+      if (prev) r.push(x.d, x.p, STATUS_LABEL[x.st].replace(/^\S+\s/, ''));
+      r.push(x.share);
+      return r;
+    });
+    const sums = ys.map((y) => items.reduce((t, x) => t + val(x.o, y), 0));
+    const tot = [...(isStore ? ['Total', `${num(items.length)} tiendas`] : [`Total (${num(items.length)})`]), ...sums];
+    if (prev) { const b = sums[ys.indexOf(last)], a = sums[ys.indexOf(prev)]; tot.push(b - a, varPct(b, a), ''); }
+    tot.push(totLast && items.length ? sums[ys.indexOf(last)] / totLast : null);
+    const n = head.length;
+    return { head, rows, foot: [tot], types, keys, items, varCols: prev ? [n - 4, n - 3] : [], stCol: prev ? n - 2 : -1 };
   }
 
   // ---------------------------------------------------------------- render
   let lastF = null, lastR = null;
 
+  function cell(v, t) {
+    if (v == null) return '—';
+    if (t === '$') return money(v);
+    if (t === '%') return pct(v);
+    if (t === 'p') return fmtPct.format(v);
+    if (t === 'n') return num(v);
+    return esc(v);
+  }
+  const dirCls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
+
+  function renderTable(id, T, sortKind) {
+    const sort = sortKind ? state.sort[sortKind] : null;
+    const th = T.head.map((h, i) => {
+      const k = T.keys?.[i];
+      const arrow = sort && k === sort.key ? `<span class="arrow">${sort.dir > 0 ? '▲' : '▼'}</span>` : '';
+      return `<th class="${T.types[i] === 't' ? '' : 'num'}" ${k ? `data-sort="${k}"` : ''}>${esc(h)}${arrow}</th>`;
+    }).join('');
+    const row = (r) => `<tr>${r.map((v, i) => {
+      if (i === T.stCol && v) { const st = Object.keys(STATUS_LABEL).find((s) => STATUS_LABEL[s].endsWith(v)); return `<td><span class="pill ${st}">${STATUS_LABEL[st]}</span></td>`; }
+      if (T.types[i] === 't') return `<td>${esc(v)}</td>`;
+      return `<td class="num ${T.varCols?.includes(i) ? dirCls(v) : ''}">${cell(v, T.types[i])}</td>`;
+    }).join('')}</tr>`;
+    const body = T.rows.length ? T.rows.map(row).join('') : `<tr><td colspan="${T.head.length}" class="muted">Sin datos para estos filtros.</td></tr>`;
+    $('#' + id).innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body}</tbody>${T.foot.length ? `<tfoot>${T.foot.map(row).join('')}</tfoot>` : ''}`;
+  }
+
   function renderAll() {
-    if (!state.records.length) {
+    if (!state.records.length || !state.cut) {
       Object.values(state.charts).forEach((c) => c.destroy());
       state.charts = {};
       return;
     }
-    $('#fRangeWrap').hidden = $('#fPeriod').value !== 'custom';
     const F = currentFilters();
     const R = compute(F);
     lastF = F; lastR = R;
-    $('#periodNote').innerHTML = periodText(F);
-    $('#periodNote2').innerHTML = periodText(F);
+    for (const k of ['chains', 'stores']) {
+      const sk = state.sort[k].key;
+      if (sk === 'y0' || (sk.startsWith('y') && !F.years.includes(+sk.slice(1)))) state.sort[k] = { key: 'y' + F.C.y, dir: -1 };
+    }
+    renderBanner(F);
     renderKpis(F, R);
-    renderCharts(F, R);
-    renderChainTable(F, R);
-    renderMonthTable(F, R);
-    renderStoreTable();
+    renderYearCharts(F, R);
+    renderTable('tblYears', yearsAOA(F, R));
+    $('#noteYears').textContent = `* ${F.C.y} es el año en curso: su "Año completo" llega solo hasta el corte, por eso no se compara con el año anterior. El acumulado de cada año se calcula hasta el mismo punto (${F.C.hasW ? 'semana ' + F.C.w : MESES_LARGO[F.C.m - 1]}) para comparar en igualdad de condiciones.` + (F.C.hasW && F.years.some((y) => !state.weekYears.has(y)) ? ' Los años sin fecha diaria se acumulan hasta el mes de corte completo.' : '');
+    renderLines('chartMonths', 'm', F, R, MESES, (y, i) => (y === F.C.y && i + 1 > F.C.m ? null : R.byYM.get(y * 100 + i + 1) || 0), F.years);
+    renderTable('tblMonths', monthsAOA(F, R));
+    $('#noteMonths').textContent = F.C.hasW ? `El mes de corte (${MESES_LARGO[F.C.m - 1]}) de ${F.C.y} está incompleto: llega hasta el ${F.C.dateText}.` : '';
+    const hasWeeks = F.C.hasW && F.years.some((y) => state.weekYears.has(y));
+    $('#noWeeks').hidden = hasWeeks;
+    $('#weeksContent').hidden = !hasWeeks;
+    if (hasWeeks) {
+      const W = weeksAOA(F, R);
+      const maxW = Math.max(R.maxW, F.C.w);
+      renderLines('chartWeeks', 'w', F, R, Array.from({ length: maxW }, (_, i) => 'S' + (i + 1)), (y, i) => ((y === F.C.y && i + 1 > F.C.w) || i + 1 > weekOf(y, 12, 31) ? null : R.byYW.get(y * 100 + i + 1) || 0), W.ys);
+      renderTable('tblWeeks', W);
+    }
+    $('#chainMeasure').textContent = '· ' + MEASURES[F.measure] + (F.measure === 'ytd' ? ` (${F.C.ytdLabel(F.C.y)})` : F.measure === 'month' ? ` (${F.C.monthLabel})` : F.measure === 'week' ? ` (semana ${F.C.w})` : '');
+    renderTable('tblChains', entityAOA(F, R, 'chains'), 'chains');
+    renderStores();
   }
 
-  function kpi(label, value, sub, cls = '', sw = '') {
-    return `<div class="kpi"><div class="k-label">${sw}${label}</div><div class="k-value ${cls}">${value}</div>${sub ? `<div class="k-sub">${sub}</div>` : ''}</div>`;
+  function renderStores() {
+    if (!lastR) return;
+    const T = entityAOA(lastF, lastR, 'stores');
+    renderTable('tblStores', T, 'stores');
+    $('#storeCount').textContent = `· ${MEASURES[lastF.measure]} · ${num(T.items.length)} tiendas`;
+  }
+
+  function renderBanner(F) {
+    const { C } = F;
+    const parts = [`<b>Año ${C.y}</b>`, `<b>${C.monthLabel}</b>`];
+    if (C.hasW) parts.push(`<b>Semana ${C.w}</b>`);
+    let t = `<span class="cut-tag">Corte de evaluación</span> ${parts.join(' · ')} <span class="muted">— último dato en los archivos: ${C.dateText}</span>`;
+    t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
+    $('#cutBanner').innerHTML = t;
+  }
+
+  function kpi(label, value, sub, cls = '') {
+    return `<div class="kpi"><div class="k-label">${label}</div><div class="k-value ${cls}">${value}</div>${sub ? `<div class="k-sub">${sub}</div>` : ''}</div>`;
   }
 
   function renderKpis(F, R) {
-    const sw = (c) => `<span class="swatch" style="background:var(${c})"></span>`;
-    const dir = R.d > 0 ? 'up' : R.d < 0 ? 'down' : '';
-    const arrow = R.d > 0 ? '▲ ' : R.d < 0 ? '▼ ' : '';
-    $('#kpis').innerHTML = [
-      kpi(`Venta ${F.yearA}`, money(R.A), R.uA ? `${num(R.uA)} unidades` : `${num(R.nA)} tiendas con venta`, '', sw('--series-a')),
-      kpi(`Venta ${F.yearB}`, money(R.B), R.uB ? `${num(R.uB)} unidades` : `${num(R.nB)} tiendas con venta`, '', sw('--series-b')),
-      kpi('Variación S/', arrow + signMoney(R.d), `${F.yearB} vs ${F.yearA}`, dir),
-      kpi('Variación %', arrow + pct(R.p), R.A > 0 ? 'sobre el año base' : 'sin venta en el año base', dir),
-      kpi('Tiendas que crecen', num(R.crece + R.nueva), `${num(R.nueva)} nuevas`, 'up'),
-      kpi('Tiendas que caen', num(R.cae + R.perdida), `${num(R.perdida)} sin venta en ${F.yearB}`, 'down'),
-    ].join('');
+    const { C } = F;
+    const Y = R.byYear.get(C.y), P = R.byYear.get(C.y - 1);
+    const vs = (b, a) => {
+      if (!P) return '';
+      const p = varPct(b, a), d = b - a;
+      return `<span class="${dirCls(d)}">${d > 0 ? '▲' : d < 0 ? '▼' : ''} ${pct(p)} · ${signMoney(d)}</span> vs ${C.y - 1}`;
+    };
+    const best = F.years.reduce((b, y) => (R.byYear.get(y).ytd > (b ? R.byYear.get(b).ytd : -Infinity) ? y : b), null);
+    const cards = [
+      kpi(`Acumulado ${C.y} (${C.ytdLabel(C.y)})`, money(Y.ytd), vs(Y.ytd, P?.ytd || 0)),
+      kpi(`Mes de corte · ${C.monthLabel} ${C.y}`, money(Y.month), vs(Y.month, P?.month || 0)),
+    ];
+    if (C.hasW) cards.push(kpi(`Semana ${C.w} · ${C.y}`, money(Y.week), state.weekYears.has(C.y - 1) ? vs(Y.week, P?.week || 0) : ''));
+    cards.push(kpi('Tiendas con venta', num(Y.stores.size), P ? `${num(P.stores.size)} en ${C.y - 1} (mismo corte)` : ''));
+    if (best != null) cards.push(kpi('Mejor año al corte', String(best), money(R.byYear.get(best).ytd)));
+    $('#kpis').innerHTML = cards.join('');
   }
 
-  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  const GRID = '#eef0f3', TICK = '#7a8292';
+  const moneyTick = (v) => (Math.abs(v) >= 1e6 ? 'S/ ' + (v / 1e6).toFixed(1) + ' M' : Math.abs(v) >= 1e3 ? 'S/ ' + Math.round(v / 1e3) + ' K' : 'S/ ' + v);
 
-  function renderCharts(F, R) {
-    const colA = cssVar('--series-a'), colB = cssVar('--series-b');
-    $('#chartLegend').innerHTML = `<span><i class="swatch" style="background:${colA}"></i>${F.yearA}</span><span><i class="swatch" style="background:${colB}"></i>${F.yearB}</span>`;
-    const grid = '#eef0f3', tick = '#7a8292';
-    const moneyTick = (v) => (Math.abs(v) >= 1e6 ? 'S/ ' + (v / 1e6).toFixed(1) + ' M' : Math.abs(v) >= 1e3 ? 'S/ ' + Math.round(v / 1e3) + ' K' : 'S/ ' + v);
-    const common = {
-      responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
-      plugins: { legend: { display: false } },
-    };
+  function upsertChart(key, canvasId, config) {
+    const ch = state.charts[key];
+    if (ch) { ch.config.type = config.type; ch.data = config.data; ch.options = config.options; ch.update(); }
+    else state.charts[key] = new Chart($('#' + canvasId), config);
+  }
 
-    const mData = {
-      labels: R.months.map((x) => MESES[x.m - 1]),
-      datasets: [
-        { label: String(F.yearA), data: R.months.map((x) => x.a), backgroundColor: colA, borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: 0.7, barPercentage: 0.9 },
-        { label: String(F.yearB), data: R.months.map((x) => x.b), backgroundColor: colB, borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: 0.7, barPercentage: 0.9 },
-      ],
-    };
-    const mOpts = {
-      ...common,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}`,
-            footer: (items) => {
-              const a = items.find((i) => i.datasetIndex === 0)?.parsed.y || 0;
-              const b = items.find((i) => i.datasetIndex === 1)?.parsed.y || 0;
-              return a > 0 ? `Var: ${signMoney(b - a)} (${pct((b - a) / a)})` : '';
-            },
-          },
+  function renderYearCharts(F, R) {
+    const { C } = F;
+    $('#ttlYtdChart').textContent = `Acumulado al corte por año (${C.hasW ? 'sem 1–' + C.w : 'Ene–' + MESES[C.m - 1]})`;
+    const bar = (field, id, key) => upsertChart(key, id, {
+      type: 'bar',
+      data: { labels: F.years.map(String), datasets: [{ data: F.years.map((y) => R.byYear.get(y)[field]), backgroundColor: F.years.map(yearColor), borderRadius: 4, borderSkipped: 'bottom', barPercentage: 0.6 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => { const y = F.years[c.dataIndex], P = R.byYear.get(y - 1); const v = c.parsed.y; return ` ${money(v)}` + (P ? `  (${pct(varPct(v, P[field]))} vs ${y - 1})` : ''); } } },
         },
+        scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
       },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: tick } },
-        y: { beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: tick, callback: moneyTick } },
-      },
-    };
-    if (state.charts.m) { state.charts.m.data = mData; state.charts.m.options = mOpts; state.charts.m.update(); }
-    else state.charts.m = new Chart($('#chartMonthly'), { type: 'bar', data: mData, options: mOpts });
-
-    const top = R.chains.filter((c) => c.a > 0);
-    const good = cssVar('--good'), bad = cssVar('--bad');
-    const cData = {
-      labels: top.map((c) => (c.cadena.length > 22 ? c.cadena.slice(0, 21) + '…' : c.cadena)),
-      datasets: [{ data: top.map((c) => +(c.p * 100).toFixed(1)), backgroundColor: top.map((c) => (c.p >= 0 ? good : bad)), borderRadius: 4, barPercentage: 0.75 }],
-    };
-    const cOpts = {
-      ...common,
-      indexAxis: 'y',
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { title: (i) => top[i[0].dataIndex].cadena, label: (c) => { const x = top[c.dataIndex]; return ` ${pct(x.p)} · ${signMoney(x.d)}  (${money(x.a)} → ${money(x.b)})`; } } },
-      },
-      scales: {
-        x: { grid: { color: grid }, border: { display: false }, ticks: { color: tick, callback: (v) => v + '%' } },
-        y: { grid: { display: false }, ticks: { color: '#4c5361', autoSkip: false } },
-      },
-    };
-    $('#chartChains').parentElement.style.height = Math.max(220, top.length * 26 + 60) + 'px';
-    if (state.charts.c) { state.charts.c.data = cData; state.charts.c.options = cOpts; state.charts.c.update(); }
-    else state.charts.c = new Chart($('#chartChains'), { type: 'bar', data: cData, options: cOpts });
-  }
-
-  const tdNum = (v, cls = '') => `<td class="num ${cls}">${v}</td>`;
-  const dirCls = (d) => (d > 0 ? 'up' : d < 0 ? 'down' : '');
-
-  // Datos tabulares (se reutilizan para copiar y exportar)
-  function chainAOA(F, R) {
-    const head = ['Cadena', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %', `Tiendas ${F.yearA}`, `Tiendas ${F.yearB}`, 'Crecen', 'Caen', `Part. ${F.yearB}`];
-    const rows = R.chains.map((c) => [c.cadena, c.a, c.b, c.d, c.p, c.nA, c.nB, c.up, c.down, R.B ? c.b / R.B : null]);
-    const tot = ['Total', R.A, R.B, R.d, R.p, R.nA, R.nB, R.crece + R.nueva, R.cae + R.perdida, R.B ? 1 : null];
-    return { head, rows, tot, types: ['t', '$', '$', '$', '%', 'n', 'n', 'n', 'n', 'p'] };
-  }
-  function monthAOA(F, R) {
-    const head = ['Mes', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %'];
-    const rows = R.months.map((x) => [MESES_LARGO[x.m - 1], x.a, x.b, x.b - x.a, x.a > 0 ? (x.b - x.a) / x.a : null]);
-    return { head, rows, tot: ['Total', R.A, R.B, R.d, R.p], types: ['t', '$', '$', '$', '%'] };
-  }
-  function storeRows() {
-    const F = lastF, R = lastR;
-    const q = norm($('#fSearch').value);
-    const st = $('#fStatus').value;
-    let rows = R.stores.filter((s) => (s.a || s.b));
-    if (q) rows = rows.filter((s) => norm(s.tienda).includes(q) || norm(s.cadena).includes(q));
-    if (st) rows = rows.filter((s) => s.st === st);
-    const { key, dir } = state.sort;
-    rows.sort((x, y) => {
-      let a = x[key], b = y[key];
-      if (key.startsWith('m')) { a = x.mb[+key.slice(1)] || 0; b = y.mb[+key.slice(1)] || 0; }
-      if (a == null) return 1; if (b == null) return -1;
-      return (typeof a === 'string' ? a.localeCompare(b, 'es') : a - b) * dir;
     });
-    return { F, R, rows };
-  }
-  function storeAOA() {
-    const { F, rows } = storeRows();
-    const withMonths = $('#fMonthCols').value === 'yes';
-    const head = ['Cadena', 'Tienda', `Venta ${F.yearA}`, `Venta ${F.yearB}`, 'Var S/', 'Var %', 'Estado', ...(withMonths ? F.months.map((m) => `${MESES[m - 1]} ${F.yearB}`) : [])];
-    const keys = ['cadena', 'tienda', 'a', 'b', 'd', 'p', 'st', ...(withMonths ? F.months.map((m) => 'm' + m) : [])];
-    const types = ['t', 't', '$', '$', '$', '%', 't', ...(withMonths ? F.months.map(() => '$') : [])];
-    const data = rows.map((s) => [s.cadena, s.tienda, s.a, s.b, s.d, s.p, STATUS_LABEL[s.st].replace(/^\S+\s/, ''), ...(withMonths ? F.months.map((m) => s.mb[m] || 0) : [])]);
-    const sum = (i) => rows.reduce((t, s) => t + (s[i] || 0), 0);
-    const A = sum('a'), B = sum('b');
-    const tot = ['Total', `${num(rows.length)} tiendas`, A, B, B - A, A > 0 ? (B - A) / A : null, '', ...(withMonths ? F.months.map((m) => rows.reduce((t, s) => t + (s.mb[m] || 0), 0)) : [])];
-    return { head, rows: data, tot, types, keys, raw: rows };
+    bar('ytd', 'chartYears', 'y1');
+    bar('full', 'chartYearsFull', 'y2');
   }
 
-  function cell(v, t) {
-    if (t === '$') return money(v);
-    if (t === '%') return pct(v);
-    if (t === 'p') return v == null ? '—' : fmtPct.format(v);
-    if (t === 'n') return num(v);
-    return esc(v);
-  }
-
-  function renderSimpleTable(id, T, varIdx = [3, 4]) {
-    const th = T.head.map((h, i) => `<th class="${T.types[i] === 't' ? '' : 'num'}">${esc(h)}</th>`).join('');
-    const body = T.rows.map((r) => `<tr>${r.map((v, i) => (T.types[i] === 't' ? `<td>${esc(v)}</td>` : tdNum(cell(v, T.types[i]), varIdx.includes(i) ? dirCls(r[3]) : ''))).join('')}</tr>`).join('');
-    const foot = `<tr>${T.tot.map((v, i) => (T.types[i] === 't' ? `<td>${esc(v)}</td>` : tdNum(cell(v, T.types[i]), varIdx.includes(i) ? dirCls(T.tot[3]) : ''))).join('')}</tr>`;
-    $('#' + id).innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot>`;
-  }
-  function renderChainTable(F, R) { renderSimpleTable('tblChains', chainAOA(F, R)); }
-  function renderMonthTable(F, R) { renderSimpleTable('tblMonths', monthAOA(F, R)); }
-
-  function renderStoreTable() {
-    if (!lastR) return;
-    const T = storeAOA();
-    const { key, dir } = state.sort;
-    const th = T.head.map((h, i) => `<th class="${T.types[i] === 't' ? '' : 'num'}" data-sort="${T.keys[i]}">${esc(h)}${T.keys[i] === key ? `<span class="arrow">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('');
-    const shown = T.raw;
-    const body = shown.map((s, ri) => {
-      const r = T.rows[ri];
-      return `<tr>${r.map((v, i) => {
-        const k = T.keys[i];
-        if (k === 'st') return `<td><span class="pill ${s.st}">${STATUS_LABEL[s.st]}</span></td>`;
-        if (T.types[i] === 't') return `<td>${esc(v)}</td>`;
-        const cls = (k === 'd' || k === 'p') ? dirCls(s.d) : '';
-        return tdNum(cell(v, T.types[i]), cls);
-      }).join('')}</tr>`;
-    }).join('');
-    const foot = `<tr>${T.tot.map((v, i) => (T.types[i] === 't' ? `<td>${esc(v)}</td>` : tdNum(cell(v, T.types[i]), (T.keys[i] === 'd' || T.keys[i] === 'p') ? dirCls(T.tot[4]) : ''))).join('')}</tr>`;
-    $('#tblStores').innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body || `<tr><td colspan="${T.head.length}" class="muted">Sin tiendas para estos filtros.</td></tr>`}</tbody><tfoot>${foot}</tfoot>`;
-    $('#storeCount').textContent = `· ${num(T.raw.length)}`;
+  function renderLines(canvasId, key, F, R, labels, getter, years) {
+    const legendHtml = [...years].reverse().map((y) => `<span><i class="swatch" style="background:${yearColor(y)}"></i>${y}</span>`).join('');
+    $$('[data-legend]', $('#' + canvasId).closest('.card')).forEach((el) => (el.innerHTML = legendHtml));
+    upsertChart(key, canvasId, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: years.map((y) => ({
+          label: String(y), data: labels.map((_, i) => getter(y, i)),
+          borderColor: yearColor(y), backgroundColor: yearColor(y),
+          borderWidth: y === F.C.y ? 3 : 2, pointRadius: labels.length > 20 ? 0 : 3, pointHoverRadius: 5, tension: labels.length > 20 ? 0 : 0.25, spanGaps: false,
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { itemSort: (a, b) => +b.dataset.label - +a.dataset.label, callbacks: { label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
+        scales: { x: { grid: { display: false }, ticks: { color: TICK, autoSkip: true, maxRotation: 0 } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
+      },
+    });
   }
 
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
-    if (id === 'tblChains') return chainAOA(lastF, lastR);
-    if (id === 'tblMonths') return monthAOA(lastF, lastR);
-    return storeAOA();
+    const F = lastF, R = lastR;
+    return { years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
   }
   async function copyTable(id) {
     const T = aoaFor(id);
     const fmt = (v, t) => (v == null ? '' : t === '%' || t === 'p' ? (v * 100).toFixed(1) + '%' : t === '$' || t === 'n' ? String(Math.round(v * 100) / 100) : String(v));
-    const lines = [T.head, ...T.rows, T.tot].map((r) => r.map((v, i) => fmt(v, T.types[i])).join('\t'));
+    const lines = [T.head, ...T.rows, ...T.foot].map((r) => r.map((v, i) => fmt(v, T.types[i])).join('\t'));
     try { await navigator.clipboard.writeText(lines.join('\n')); toast('Tabla copiada: pégala en Excel.'); }
     catch { toast('No se pudo copiar en este navegador.'); }
   }
 
   function sheetFrom(T, title) {
-    const aoa = [[title], [], T.head, ...T.rows, T.tot];
+    const aoa = [[title], [], T.head, ...T.rows, ...T.foot];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let R = 3; R <= range.e.r; R++) {
-      T.types.forEach((t, C) => {
-        const c = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        if (!c || c.t !== 'n') return;
-        if (t === '$') c.v = Math.round(c.v * 100) / 100;
-        c.z = t === '%' || t === 'p' ? '0.0%' : t === '$' ? '#,##0.00' : '#,##0';
+    for (let r = 3; r <= range.e.r; r++) {
+      T.types.forEach((t, c) => {
+        const ce = ws[XLSX.utils.encode_cell({ r, c })];
+        if (!ce || ce.t !== 'n') return;
+        if (t === '$') ce.v = Math.round(ce.v * 100) / 100;
+        ce.z = t === '%' || t === 'p' ? '0.0%' : t === '$' ? '#,##0.00' : '#,##0';
       });
     }
-    ws['!cols'] = T.head.map((h, i) => ({ wch: i < 2 && T.types[i] === 't' ? 28 : Math.max(12, String(h).length + 2) }));
-    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: 2 + T.rows.length, c: T.head.length - 1 } }) };
+    ws['!cols'] = T.head.map((h, i) => ({ wch: T.types[i] === 't' && i < 2 ? 28 : Math.max(13, String(h).length + 2) }));
+    if (T.rows.length) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: 2 + T.rows.length, c: T.head.length - 1 } }) };
     return ws;
   }
 
   function exportExcel() {
     if (!lastR) return;
-    const F = lastF, R = lastR;
-    const plain = periodText(F).replace(/<[^>]+>/g, '');
+    const F = lastF, R = lastR, C = F.C;
+    const corte = `Corte: ${C.y} · ${C.monthLabel}${C.hasW ? ' · Semana ' + C.w : ''} (último dato ${C.dateText})`;
+    const filt = `${corte}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
     const wb = XLSX.utils.book_new();
-    const k = [
-      ['Reporte Vs Anual'], [plain], [],
-      ['Indicador', String(F.yearA), String(F.yearB), 'Var S/', 'Var %'],
-      ['Venta (S/)', R.A, R.B, R.d, R.p],
-      ['Tiendas con venta', R.nA, R.nB, R.nB - R.nA, R.nA ? (R.nB - R.nA) / R.nA : null],
-      [], ['Tiendas que crecen', R.crece], ['Tiendas que caen', R.cae], ['Tiendas nuevas', R.nueva], [`Sin venta en ${F.yearB}`, R.perdida],
-    ];
-    const ws0 = XLSX.utils.aoa_to_sheet(k);
-    ['B5', 'C5', 'D5'].forEach((a) => ws0[a] && (ws0[a].z = '#,##0.00'));
-    ['E5', 'E6'].forEach((a) => ws0[a] && (ws0[a].z = '0.0%'));
-    ws0['!cols'] = [{ wch: 26 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws0, 'Resumen');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(chainAOA(F, R), 'Resumen por cadena · ' + plain), 'Por cadena');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(monthAOA(F, R), 'Detalle mensual · ' + plain), 'Mensual');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(storeAOA(), 'Detalle por tienda · ' + plain), 'Por tienda');
-    XLSX.writeFile(wb, `Reporte_Vs_Anual_${F.yearB}_vs_${F.yearA}${F.chain ? '_' + F.chain.replace(/[^\w]+/g, '_') : ''}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(monthsAOA(F, R), 'Meses × años · ' + filt), 'Por mes');
+    if (C.hasW && F.years.some((y) => state.weekYears.has(y))) XLSX.utils.book_append_sheet(wb, sheetFrom(weeksAOA(F, R), 'Semanas × años · ' + filt), 'Por semana');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(entityAOA(F, R, 'chains'), `Cadenas · ${MEASURES[F.measure]} · ` + filt), 'Por cadena');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(entityAOA(F, R, 'stores'), `Tiendas · ${MEASURES[F.measure]} · ` + filt), 'Por tienda');
+    XLSX.writeFile(wb, `Reporte_Vs_Anual_${F.years[0]}-${C.y}${F.chain ? '_' + F.chain.replace(/[^\w]+/g, '_') : ''}.xlsx`);
   }
 
   // ---------------------------------------------------------------- eventos
@@ -813,15 +910,19 @@
     state.view = v;
     $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === v));
     $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
-    if (v !== 'datos') Object.values(state.charts).forEach((c) => c.resize());
+    $('#analysis').hidden = v === 'datos';
+    $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
+    $('#fMeasureWrap').hidden = !(v === 'cadena' || v === 'tienda');
+    Object.values(state.charts).forEach((c) => c.resize());
     window.scrollTo({ top: 0 });
   }
 
   function init() {
     if (!window.XLSX) { document.body.innerHTML = '<p style="padding:40px">No se pudo cargar el lector de Excel. Revisa tu conexión y recarga la página.</p>'; return; }
+    state.sort = { chains: { key: 'y0', dir: -1 }, stores: { key: 'y0', dir: -1 } };
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-    $('#btnGoCompare').addEventListener('click', () => setView('comparativo'));
-    ['#fileInput', '#fileInputTop'].forEach((s) => $(s).addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); if (s === '#fileInputTop') setView('datos'); }));
+    $('#btnGoCompare').addEventListener('click', () => setView('anual'));
+    ['#fileInput', '#fileInputTop'].forEach((s) => $(s).addEventListener('change', (e) => { if (s === '#fileInputTop') setView('datos'); handleFiles(e.target.files).then(() => { e.target.value = ''; }); }));
 
     const dz = $('#dropzone');
     ['dragenter', 'dragover'].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('over'); }));
@@ -837,23 +938,25 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
-    ['#fYearA', '#fYearB', '#fPeriod', '#fMonthFrom', '#fMonthTo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', () => { renderAll(); }));
+    ['#fFrom', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
     let tSearch;
-    $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(() => { renderStoreTable(); }, 150); });
-    ['#fStatus', '#fMonthCols'].forEach((s) => $(s).addEventListener('change', () => { renderStoreTable(); }));
-    $('#tblStores').addEventListener('click', (e) => {
-      const th = e.target.closest('th[data-sort]');
-      if (!th) return;
-      const k = th.dataset.sort;
-      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['cadena', 'tienda', 'st'].includes(k) ? 1 : -1 };
-      renderStoreTable();
-    });
+    $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(renderStores, 150); });
+    $('#fStatus').addEventListener('change', renderStores);
+    for (const [id, kind] of [['#tblChains', 'chains'], ['#tblStores', 'stores']]) {
+      $(id).addEventListener('click', (e) => {
+        const th = e.target.closest('th[data-sort]');
+        if (!th) return;
+        const k = th.dataset.sort, cur = state.sort[kind];
+        state.sort[kind] = cur.key === k ? { key: k, dir: -cur.dir } : { key: k, dir: ['name', 'cadena', 'st'].includes(k) ? 1 : -1 };
+        kind === 'stores' ? renderStores() : renderTable('tblChains', entityAOA(lastF, lastR, 'chains'), 'chains');
+      });
+    }
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
     renderFiles();
   }
 
   // Exponer funciones de parseo para pruebas automáticas.
-  window.__rva = { parseAmount, parseYM, parseMonth, parseYear, detectMapping, detectHeaderRow, state };
+  window.__rva = { parseAmount, parseYM, parseMonth, parseYear, weekOf, detectMapping, detectHeaderRow, state };
   document.addEventListener('DOMContentLoaded', init);
 })();
