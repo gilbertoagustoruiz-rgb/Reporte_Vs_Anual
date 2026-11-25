@@ -250,3 +250,9 @@ select, input[type="number"], input[type="search"] {
 .tab { white-space: nowrap; padding: 8px 11px; }
 .userbox .who { white-space: nowrap; }
 @media (max-width: 1500px) { .brand .sub { display: none; } .topbar { gap: 14px; } .userbox .btn { padding: 6px 9px; font-size: 12.5px; } }
+
+.tbl.cmp.wk th { text-align: center; }
+.tbl.cmp.wk th.grp { border-left: 2px solid #fff3; font-size: 13px; }
+.tbl.cmp.wk thead tr:nth-child(2) th { top: 31px; font-weight: 600; font-size: 12px; line-height: 1.2; }
+.tbl.cmp.wk td.sep { border-left: 2px solid #e3e6eb; }
+.cmp-main { min-width: 0; }

@@ -31,7 +31,7 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 
 ## Pestañas
 
-- **Comparativa**: igual que la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Usa el detalle diario guardado en la tabla `ventas_dia`.
+- **Comparativa**: igual que la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Debajo, **por semana**: tablas de Soles y Unidades con columnas Sem-N × año, más su Var % y el total, y un gráfico de barras por semana para los últimos tres años, con la Var % del año actual frente al anterior sobre cada semana. Usa el detalle diario guardado en la tabla `ventas_dia`.
 
 - **Por año**: indicadores del año en curso frente al anterior (acumulado, mes de corte y semana de corte), gráficos por año y una tabla con todos los años, cada uno con su variación contra el año anterior.
 - **Por mes**: gráfico de líneas con un año por línea y la tabla de meses × años, más la variación del último año contra el anterior.

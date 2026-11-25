@@ -1220,7 +1220,8 @@
 
     // Filtros generales (cobertura, tipo de venta, cadena, marca).
     const cobOk = (r) => F.cob === 'all' || !state.hasCob || (F.cob === 'si' ? r.cob === 1 : F.cob === 'no' ? r.cob === 0 : r.cob == null);
-    const base = data.filter((r) => (r.y === yA || r.y === yB) && cobOk(r) && (!F.tipo || r.tipo === F.tipo) && (!F.chain || r.cadena === F.chain) && (!F.brand || r.marca === F.brand));
+    const baseAll = data.filter((r) => cobOk(r) && (!F.tipo || r.tipo === F.tipo) && (!F.chain || r.cadena === F.chain) && (!F.brand || r.marca === F.brand));
+    const base = baseAll.filter((r) => r.y === yA || r.y === yB);
 
     // Segmentadores: opciones disponibles en cascada (Mes → Semana → Día), como en Excel.
     const monthsAvail = new Set(base.map((r) => r.m));
@@ -1255,11 +1256,120 @@
     $('#cmpUndCard').hidden = !hasUnits;
     if (hasUnits) renderTable('tblCmpUnd', cmpAOA('u'));
 
+    // Detalle por semana: columnas Sem-N × año, como la tabla dinámica de Excel.
+    const weeks = (cmp.weeks.size ? [...cmp.weeks] : [...new Set(sel.filter((r) => r.w > 0).map((r) => r.w))]).sort((a, b) => a - b);
+    const wk = new Map();
+    for (const r of sel) {
+      if (!(r.w > 0)) continue;
+      const k = keyOf(r);
+      const g = wk.get(k) || { k, w: {} };
+      const c = g.w[r.w] || (g.w[r.w] = { vA: 0, vB: 0, uA: 0, uB: 0 });
+      if (r.y === yA) { c.vA += r.v; c.uA += r.u; } else { c.vB += r.v; c.uB += r.u; }
+      wk.set(k, g);
+    }
+    cmp.wk = { weeks, list: [...wk.values()].sort((a, b) => a.k.localeCompare(b.k, 'es')), yA, yB, by };
+    $('#cmpWeekCard').hidden = !weeks.length;
+    $('#cmpWeekUndCard').hidden = !weeks.length || !hasUnits;
+    if (weeks.length) {
+      renderWeekTable('tblCmpWeek', 'v');
+      if (hasUnits) renderWeekTable('tblCmpWeekUnd', 'u');
+      // Gráfico: barras por semana para los últimos 3 años hasta el año comparado.
+      const chartYears = [...new Set(baseAll.map((r) => r.y))].filter((y) => y <= yB).sort((a, b) => a - b).slice(-3);
+      if (!chartYears.includes(yA)) chartYears.unshift(yA);
+      const inMD = (r) => inM(r) && inD(r);
+      const sumBy = (field) => { const m = new Map(); for (const r of baseAll) { if (!(r.w > 0) || !weeks.includes(r.w) || !inMD(r)) continue; const k = r.y * 100 + r.w; m.set(k, (m.get(k) || 0) + r[field]); } return m; };
+      renderWeekChart('chartCmpWeek', 'cw', weeks, chartYears, sumBy('v'), yA, yB, money);
+      if (hasUnits) renderWeekChart('chartCmpWeekUnd', 'cwu', weeks, chartYears, sumBy('u'), yA, yB, num);
+    }
+
     const ms = [...cmp.months].sort((a, b) => a - b).map((m) => MESES_LARGO[m - 1]);
     $('#cmpTitle').textContent = cmp.months.size === 1 && [...cmp.months][0] === C.m && yB === C.y ? 'MES ACTUAL' : (ms.join(' + ') || 'TODO EL AÑO').toUpperCase();
     const dsel = [...cmp.days].sort((a, b) => a - b);
     const dTxt = !dsel.length ? 'todos los días' : dsel.length > 2 && dsel[dsel.length - 1] - dsel[0] + 1 === dsel.length ? `días ${dsel[0]} al ${dsel[dsel.length - 1]}` : `días ${dsel.join(', ')}`;
     $('#cmpNote').innerHTML = `Comparando <b>${yB}</b> contra <b>${yA}</b> · ${ms.length ? ms.join(', ') : 'todos los meses'} · ${cmp.weeks.size ? 'semanas ' + [...cmp.weeks].sort((a, b) => a - b).join(', ') : 'todas las semanas'} · ${dTxt}${noDay ? ' · <span class="down">los archivos no traen fecha diaria</span>' : ''}`;
+  }
+
+  function weekAOA(field) {
+    const { weeks, list, yA, yB, by } = cmp.wk;
+    const unit = field === 'v' ? 'Soles' : 'Und';
+    const A = field === 'v' ? 'vA' : 'uA', B = field === 'v' ? 'vB' : 'uB';
+    const t = field === 'v' ? '$' : 'n';
+    const head = [by === 'marca' ? 'Marca' : by === 'tipo' ? 'Tipo de venta' : 'Cadena'];
+    const types = ['t'];
+    for (const w of weeks) { head.push(`Sem-${w} ${yA} ${unit}`, `Sem-${w} ${yB} ${unit}`, `Sem-${w} Var %`); types.push(t, t, '%'); }
+    head.push(`Total ${yA} ${unit}`, `Total ${yB} ${unit}`, 'Total Var %'); types.push(t, t, '%');
+    const rowOf = (label, cells) => {
+      const r = [label]; let ta = 0, tb = 0;
+      for (const w of weeks) { const c = cells(w); r.push(c.a, c.b, varPct(c.b, c.a)); ta += c.a; tb += c.b; }
+      r.push(ta, tb, varPct(tb, ta));
+      return r;
+    };
+    const rows = list.map((g) => rowOf(g.k, (w) => ({ a: g.w[w]?.[A] || 0, b: g.w[w]?.[B] || 0 }))).filter((r) => r.slice(1).some((v, i) => types[i + 1] !== '%' && v));
+    const foot = [rowOf('Total general', (w) => ({ a: list.reduce((s, g) => s + (g.w[w]?.[A] || 0), 0), b: list.reduce((s, g) => s + (g.w[w]?.[B] || 0), 0) }))];
+    return { head, rows, foot, types, weeks, yA, yB, unit };
+  }
+
+  function renderWeekTable(id, field) {
+    const T = weekAOA(field);
+    const groups = [...T.weeks.map((w) => `Sem-${w}`), 'Total'];
+    const th1 = `<tr><th rowspan="2">${esc(T.head[0])}</th>${groups.map((g) => `<th colspan="3" class="grp">${g}</th>`).join('')}</tr>`;
+    const th2 = `<tr>${groups.map(() => `<th class="num">${T.yA}<br>${T.unit}</th><th class="num">${T.yB}<br>${T.unit}</th><th class="num">Var%</th>`).join('')}</tr>`;
+    const row = (r) => `<tr>${r.map((v, i) => (i === 0 ? `<td>${esc(v)}</td>` : `<td class="num ${T.types[i] === '%' ? dirCls(v) : ''} ${(i - 1) % 3 === 0 ? 'sep' : ''}">${cell(v, T.types[i])}</td>`)).join('')}</tr>`;
+    $('#' + id).innerHTML = `<thead>${th1}${th2}</thead><tbody>${T.rows.map(row).join('')}</tbody><tfoot>${T.foot.map(row).join('')}</tfoot>`;
+  }
+
+  // Etiquetas: valor vertical dentro de cada barra y Var % (último año vs anterior) sobre cada semana.
+  const barLabels = {
+    id: 'barLabels',
+    afterDatasetsDraw(chart, _a, opts) {
+      const { ctx } = chart;
+      ctx.save();
+      chart.data.datasets.forEach((ds, di) => {
+        chart.getDatasetMeta(di).data.forEach((bar, i) => {
+          const v = ds.data[i];
+          if (!v || bar.height < 46) return;
+          ctx.save();
+          ctx.translate(bar.x, bar.base - 6);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillStyle = '#fff'; ctx.font = '600 11px Segoe UI, system-ui, sans-serif'; ctx.textBaseline = 'middle';
+          ctx.fillText(opts.fmt(v), 0, 0);
+          ctx.restore();
+        });
+      });
+      (opts.vars || []).forEach((p, i) => {
+        if (p == null) return;
+        const metas = chart.data.datasets.map((_, di) => chart.getDatasetMeta(di).data[i]).filter(Boolean);
+        const top = Math.min(...metas.map((m) => m.y));
+        const x = metas.reduce((s, m) => s + m.x, 0) / metas.length;
+        const txt = (p > 0 ? '+' : '') + (p * 100).toFixed(1) + '%';
+        ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+        const w = ctx.measureText(txt).width + 12;
+        ctx.fillStyle = p >= 0 ? '#0f7b3d' : '#c62828';
+        ctx.beginPath(); ctx.roundRect(x - w / 2, top - 26, w, 20, 5); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(txt, x, top - 16);
+      });
+      ctx.restore();
+    },
+  };
+
+  function renderWeekChart(canvasId, key, weeks, years, sums, yA, yB, fmt) {
+    const legend = years.map((y) => `<span><i class="swatch" style="background:${yearColor(y)}"></i>${y}</span>`).join('') + `<span><i class="swatch" style="background:#0f7b3d"></i>Var % ${yB} vs ${yA}</span>`;
+    $('#' + canvasId).closest('.card').querySelector('[data-legend]').innerHTML = legend;
+    const vars = weeks.map((w) => varPct(sums.get(yB * 100 + w) || 0, sums.get(yA * 100 + w) || 0));
+    const short = (v) => (fmt === money ? 'S/ ' + fmtNum0.format(v) : fmtNum0.format(v));
+    upsertChart(key, canvasId, {
+      type: 'bar',
+      data: { labels: weeks.map((w) => `Sem-${w}`), datasets: years.map((y) => ({ label: String(y), data: weeks.map((w) => sums.get(y * 100 + w) || 0), backgroundColor: yearColor(y), borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: 0.75, barPercentage: 0.9 })) },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        layout: { padding: { top: 30 } },
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, barLabels: { fmt: short, vars }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fmt(c.parsed.y)}`, footer: (it) => { const p = vars[it[0].dataIndex]; return p == null ? '' : `Var % ${yB} vs ${yA}: ${pct(p)}`; } } } },
+        scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: fmt === money ? moneyTick : (v) => fmtNum0.format(v) } } },
+      },
+      plugins: [barLabels],
+    });
   }
 
   function cmpAOA(field) {
@@ -1276,7 +1386,7 @@
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
     const F = lastF, R = lastR;
-    return { cmpSoles: () => cmpAOA('v'), cmpUnd: () => cmpAOA('u'), groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
+    return { cmpSoles: () => cmpAOA('v'), cmpUnd: () => cmpAOA('u'), cmpWeek: () => weekAOA('v'), cmpWeekUnd: () => weekAOA('u'), groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
   }
   async function copyTable(id) {
     const T = aoaFor(id);
@@ -1312,6 +1422,10 @@
     if (cmp.last && cmp.last.list.length) {
       XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('v'), 'Comparativa (soles) · ' + $('#cmpNote').textContent), 'Comparativa soles');
       if (cmp.last.list.some((g) => g.uA || g.uB)) XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('u'), 'Comparativa (unidades) · ' + $('#cmpNote').textContent), 'Comparativa und');
+      if (cmp.wk && cmp.wk.weeks.length) {
+        XLSX.utils.book_append_sheet(wb, sheetFrom(weekAOA('v'), 'Comparativa por semana (soles) · ' + $('#cmpNote').textContent), 'Semanas soles');
+        if (cmp.last.list.some((g) => g.uA || g.uB)) XLSX.utils.book_append_sheet(wb, sheetFrom(weekAOA('u'), 'Comparativa por semana (unidades) · ' + $('#cmpNote').textContent), 'Semanas und');
+      }
     }
     XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
     if (F.showShare) XLSX.utils.book_append_sheet(wb, sheetFrom(groupsAOA(F, R), 'Venta Paraíso vs Competencia · ' + filt), 'Paraíso vs Competencia');
