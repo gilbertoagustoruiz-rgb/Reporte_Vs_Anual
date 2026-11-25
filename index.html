@@ -84,6 +84,14 @@
         <div class="cut-banner" id="cutBanner"></div>
         <div class="filters card">
           <div class="f"><label>Desde el año</label><select id="fFrom"></select></div>
+          <div class="f" id="fCobWrap" hidden><label>Cobertura</label>
+            <select id="fCob">
+              <option value="si" selected>Solo coberturados</option>
+              <option value="no">Solo no coberturados</option>
+              <option value="sd">Sin dato de cobertura</option>
+              <option value="all">Todos</option>
+            </select>
+          </div>
           <div class="f" id="fTipoWrap"><label>Tipo de venta</label>
             <select id="fTipo">
               <option value="">Todas (Paraíso + Competencia)</option>

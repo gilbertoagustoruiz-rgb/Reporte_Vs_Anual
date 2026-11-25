@@ -88,6 +88,18 @@
     return Math.floor((doy - 1 + wd) / 7) + 1;
   }
 
+  /** 1 = coberturado, 0 = no coberturado, null = sin dato. */
+  function parseCobertura(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (typeof v === 'number') return v === 1 ? 1 : v === 0 ? 0 : null;
+    const n = norm(v);
+    if (!n) return null;
+    if (/^(no|n|sin|0|false|falso|descubiert)/.test(n)) return 0;
+    if (/^(si|s|x|1|true|verdadero|ok|cubiert|con cobertura|cobertur|activ)/.test(n)) return 1;
+    return null;
+  }
+
   function parseWeek(v) {
     if (v == null || v === '') return null;
     const m = String(v).match(/(\d{1,2})\s*$/) || String(v).match(/(\d{1,2})/);
@@ -166,6 +178,7 @@
     { key: 'tienda', label: 'Tienda / PDV' },
     { key: 'marca', label: 'Marca' },
     { key: 'unidades', label: 'Unidades' },
+    { key: 'cobertura', label: 'Cobertura' },
   ];
 
   const RULES = {
@@ -177,6 +190,7 @@
     cadena: { pats: [/^(cadena|cadena comercial|retail|cliente|razon social|chain)$/, /\bcadena|\bretail\b|\bcliente\b|\bchain\b|\bcanal\b/], not: /cod|id\b|ruc/ },
     tienda: { pats: [/^(tienda|pdv|punto de venta|local|sucursal|store|nombre tienda|nombre pdv|nombre local|desc tienda|descripcion tienda|tienda nombre)$/, /\b(tienda|pdv|punto de venta|local|sucursal|store)\b/], not: /\bcod|codigo|\bid\b|cadena/ },
     marca: { pats: [/^(marca|brand)$/, /\bmarca\b|\bbrand\b/], not: /cod/ },
+    cobertura: { pats: [/^(cobertura|coberturado|coberturada|cobertura pdv|estado cobertura|tipo cobertura|cobertura tienda|cob)$/, /cobert/], not: /fecha|venta|monto/ },
     unidades: { pats: [/^(unidades|cantidad|und|qty|piezas)$/, /\bcant|\bunid|\bund\b|\bqty\b|\bpiezas\b/], not: /precio|venta s/ },
   };
   const FALLBACK = { tienda: /\b(tienda|pdv|local|sucursal|store)\b/ }; // si solo hay código de tienda
@@ -214,7 +228,7 @@
     const used = new Set();
     const map = {};
     const hn = headers.map(norm);
-    for (const role of ['venta', 'fecha', 'anio', 'semana', 'mes', 'cadena', 'tienda', 'marca', 'unidades']) {
+    for (const role of ['venta', 'fecha', 'anio', 'semana', 'mes', 'cobertura', 'cadena', 'tienda', 'marca', 'unidades']) {
       const r = RULES[role];
       let found = -1;
       for (const p of r.pats) {
@@ -345,11 +359,14 @@
     const monthsByYear = {};
     const partErrors = [];
     let anyWide = false;
+    let covTotal = 0, uncovTotal = 0, unkTotal = 0;
+    const unknownLabels = new Set();
     f.error = null;
 
     const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
-    const add = (cad, tie, mar, y, m, w, v, u, d = null) => {
-      const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0);
+    const add = (cad, tie, mar, y, m, w, v, u, d = null, cob = null) => {
+      const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0) + '\u0001' + (cob == null ? '' : cob);
+      if (cob === 1) covTotal += v; else if (cob === 0) uncovTotal += v; else unkTotal += v;
       const cur = agg.get(key);
       if (cur) { cur.v += v; cur.u += u; } else agg.set(key, { v, u });
       years.add(y); total += v; used++;
@@ -371,6 +388,12 @@
       if (mp.venta == null && !isWide) { partErrors.push(`${part.sheet}: no encontré la columna de venta.`); continue; }
       if (!isWide && mp.fecha == null && mp.mes == null && mp.anio == null && mp.semana == null && !part.sheetMonth) { partErrors.push(`${part.sheet}: no encontré fecha, año ni mes.`); continue; }
       const val = (r, k) => (mp[k] == null ? null : r[mp[k]]);
+      const cobOf = (r) => {
+        if (mp.cobertura == null) return null;
+        const raw = val(r, 'cobertura'), c = parseCobertura(raw);
+        if (c == null && raw != null && raw !== '' && unknownLabels.size < 6) unknownLabels.add(String(raw).trim());
+        return c;
+      };
       for (const r of rows) {
         if (!r) continue;
         const cad = label(val(r, 'cadena'), '(Sin cadena)');
@@ -382,7 +405,7 @@
           for (const c of wide) {
             const v = parseAmount(r[c.i]);
             if (v == null || v === 0) continue;
-            add(cad, tie, mar, c.y, c.m, 0, v, 0);
+            add(cad, tie, mar, c.y, c.m, 0, v, 0, null, cobOf(r));
           }
           continue;
         }
@@ -408,7 +431,7 @@
         const u = mp.unidades != null ? parseAmount(val(r, 'unidades')) || 0 : 0;
         let w = ym.d ? weekOf(ym.y, ym.m, ym.d) : 0;
         if (mp.semana != null) w = parseWeek(val(r, 'semana')) || w;
-        add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d);
+        add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d, cobOf(r));
       }
     }
     if (!used) f.error = partErrors[0] || 'No pude leer ninguna fila con venta y fecha. Revisa la fila de encabezados y las columnas elegidas.';
@@ -423,7 +446,10 @@
         warnings.push(`⚠ El año ${y} solo tiene datos de ${MESES_LARGO[m - 1].toLowerCase()}. Si el archivo trae más meses, revisa la hoja elegida o la columna de fecha/mes.`);
       }
     }
-    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide });
+    const hasCob = f.parts.some((p) => p.mapping.cobertura != null);
+    if (used && !hasCob) warnings.push('⚠ No encontré la columna de cobertura: estos datos no aparecerán cuando el reporte muestre "Solo coberturados". Elígela en la lista "Cobertura".');
+    if (unknownLabels.size) warnings.push(`Valores de cobertura que no reconocí (cuentan como "sin dato"): ${[...unknownLabels].join(', ')}.`);
+    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide, hasCob, covTotal, uncovTotal, unkTotal });
   }
 
   function monthsText(set) {
@@ -484,7 +510,7 @@
 
   function applyServerData(D) {
     const { dict } = D;
-    const records = D.rows.map(([ci, ti, mi, y, m, w, v, u]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], tipo: tipoDe(dict.marcas[mi]), y, m, w, v, u }));
+    const records = D.rows.map(([ci, ti, mi, y, m, w, v, u, cob]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], tipo: tipoDe(dict.marcas[mi]), y, m, w, v, u, cob: cob ?? null }));
     const years = [...new Set(records.filter((r) => r.v).map((r) => r.y))].sort((a, b) => a - b);
     const weekYears = new Set(records.filter((r) => r.w > 0 && r.v).map((r) => r.y));
     let cut = null;
@@ -499,7 +525,7 @@
       };
       if (cut.m !== lastInfo.max_mes) cut.d = null;
     }
-    Object.assign(state, { records, years, cut, weekYears, hasBrand: records.some((r) => r.marca) });
+    Object.assign(state, { records, years, cut, weekYears, hasBrand: records.some((r) => r.marca), hasCob: records.some((r) => r.cob != null) });
     syncFilterOptions();
     renderFiles();
     renderBase();
@@ -515,13 +541,14 @@
       <td>${a.max_dia ? `${String(a.max_dia).padStart(2, '0')}/${String(a.max_mes).padStart(2, '0')}/${a.anio}` : `${MESES_LARGO[a.max_mes - 1]} ${a.anio}`}</td>
       <td class="num">${num(a.filas)}</td>
       <td class="num">${money(a.total)}</td>
+      <td class="num">${a.con_cobertura ? `${money(a.cubierto)} <span class="muted small">(${a.total ? fmtPct.format(a.cubierto / a.total) : '—'})</span>` : '<span class="down small">Sin columna de cobertura</span>'}</td>
       <td>${esc(a.usuario || '—')}</td>
       <td>${new Date(a.actualizado).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
       <td class="muted small">${esc((a.archivos || []).join(', '))}</td>
       ${logged ? `<td><button class="btn btn-danger" data-del-year="${a.anio}">Eliminar</button></td>` : ''}
     </tr>`).join('');
-    $('#tblBase').innerHTML = `<thead><tr><th>Año</th><th>Último dato</th><th class="num">Registros</th><th class="num">Venta</th><th>Subido por</th><th>Actualizado</th><th>Archivos</th>${logged ? '<th></th>' : ''}</tr></thead>
-      <tbody>${rows || `<tr><td colspan="8" class="muted">La base todavía está vacía.</td></tr>`}</tbody>`;
+    $('#tblBase').innerHTML = `<thead><tr><th>Año</th><th>Último dato</th><th class="num">Registros</th><th class="num">Venta</th><th class="num">Venta coberturada</th><th>Subido por</th><th>Actualizado</th><th>Archivos</th>${logged ? '<th></th>' : ''}</tr></thead>
+      <tbody>${rows || `<tr><td colspan="9" class="muted">La base todavía está vacía.</td></tr>`}</tbody>`;
     const last = state.years[state.years.length - 1];
     const bm = new Map();
     for (const r of state.records) {
@@ -555,8 +582,8 @@
     const rows = [];
     let total = 0;
     for (const [k, o] of agg) {
-      const [c, t, m, y, mo, w] = k.split('\u0001');
-      rows.push([c, t, m, +y, +mo, +w, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100]);
+      const [c, t, m, y, mo, w, cob] = k.split('\u0001');
+      rows.push([c, t, m, +y, +mo, +w, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100, cob === '' ? null : +cob]);
       total += o.v;
     }
     const anios = Object.keys(maxY).map((y) => ({ anio: +y, max_mes: maxY[y].m, max_dia: maxY[y].d })).sort((a, b) => a.anio - b.anio);
@@ -657,7 +684,7 @@
       const opts = (sel) => `<option value="">(ninguna)</option>` + f.headerText.map((h, i) => `<option value="${i}" ${sel === i ? 'selected' : ''}>${esc(h)}</option>`).join('');
       const map = f.wb ? `<div class="map-grid">${ROLES.map((r) => `<div><label>${r.label}</label><select data-act="map" data-role="${r.key}" data-id="${f.id}">${opts(f.mapping[r.key])}</select></div>`).join('')}</div>` : '';
       const info = ok
-        ? `<span class="badge ok">✓ ${num(f.used)} registros</span>${Object.keys(f.monthsByYear || {}).sort().map((y) => `<span class="badge ${f.monthsByYear[y].size === 1 ? 'err' : ''}">${y}: ${monthsText(f.monthsByYear[y])} (${f.monthsByYear[y].size} ${f.monthsByYear[y].size === 1 ? 'mes' : 'meses'})</span>`).join('')}${f.sheetMode === ALL_SHEETS ? `<span class="badge">${f.parts.length} hojas</span>` : ''}<span class="badge">${money(f.total)}</span>${f.wide ? '<span class="badge">Formato ancho</span>' : ''}`
+        ? `<span class="badge ok">✓ ${num(f.used)} registros</span>${Object.keys(f.monthsByYear || {}).sort().map((y) => `<span class="badge ${f.monthsByYear[y].size === 1 ? 'err' : ''}">${y}: ${monthsText(f.monthsByYear[y])} (${f.monthsByYear[y].size} ${f.monthsByYear[y].size === 1 ? 'mes' : 'meses'})</span>`).join('')}${f.sheetMode === ALL_SHEETS ? `<span class="badge">${f.parts.length} hojas</span>` : ''}${f.hasCob && f.total ? `<span class="badge ok">Coberturado: ${money(f.covTotal)} (${fmtPct.format(f.covTotal / f.total)})</span>` : ''}<span class="badge">${money(f.total)}</span>${f.wide ? '<span class="badge">Formato ancho</span>' : ''}`
         : `<span class="badge err">Revisar</span>`;
       const warns = [f.error, ...(f.warnings || [])].filter(Boolean).map((w) => `<div class="file-warn">${esc(w)}</div>`).join('');
       return `<div class="file-item">
@@ -711,6 +738,8 @@
     setOpts($('#fBrand'), [['', 'Todas'], ...brands.map((c) => [c, c])], $('#fBrand').value);
     $('#fBrandWrap').hidden = !brands.length;
     $('#fTipoWrap').hidden = !brands.length;
+    $('#fCobWrap').hidden = !state.hasCob;
+    $('#fCob option[value="sd"]').hidden = !state.records.some((r) => r.cob == null);
     // Marca: muestra a qué grupo pertenece cada una.
     $('#fBrand').innerHTML = [['', 'Todas'], ...brands.map((c) => [c, `${c} · ${tipoDe(c) === 'paraiso' ? 'Paraíso' : 'Competencia'}`])].map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
     if (brands.includes(this_brand)) $('#fBrand').value = this_brand;
@@ -724,6 +753,7 @@
   const MARCAS_PARAISO = ['PARAISO', 'VIVA-HOME', 'CASA JOVEN', 'KREA', 'KOMFORT'];
   const compact = (s) => norm(s).replace(/\s+/g, '');
   const PARAISO_SET = new Set(MARCAS_PARAISO.map(compact));
+  const COB_LABEL = { si: 'Solo coberturados', no: 'Solo no coberturados', sd: 'Sin dato de cobertura', all: 'Todos' };
   const TIPO_LABEL = { paraiso: 'Venta Paraíso', competencia: 'Venta Competencia', sinmarca: 'Sin marca' };
   function tipoDe(marca) {
     const c = compact(marca);
@@ -758,10 +788,12 @@
     const from = +$('#fFrom').value || state.years[0];
     const years = state.years.filter((y) => y >= from && y <= C.y);
     const chain = $('#fChain').value, brand = $('#fBrand').value, tipo = state.hasBrand ? $('#fTipo').value : '';
-    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo));
+    const cob = state.hasCob ? $('#fCob').value : 'all';
+    const cobOk = (r) => cob === 'all' || (cob === 'si' ? r.cob === 1 : cob === 'no' ? r.cob === 0 : r.cob == null);
+    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo) && cobOk(r));
     // La participación Paraíso solo tiene sentido viendo todas las marcas.
     const showShare = state.hasBrand && !tipo && !brand;
-    return { C, from, years, chain, brand, tipo, showShare, recs, measure: $('#fMeasure').value };
+    return { C, from, years, chain, brand, tipo, cob, showShare, recs, measure: $('#fMeasure').value };
   }
 
   const blank = () => ({ full: 0, ytd: 0, month: 0, week: 0 });
@@ -1025,7 +1057,7 @@
     const parts = [`<b>Año ${C.y}</b>`, `<b>${C.monthLabel}</b>`];
     if (C.hasW) parts.push(`<b>Semana ${C.w}</b>`);
     let t = `<span class="cut-tag">Corte de evaluación</span> ${parts.join(' · ')} <span class="muted">— último dato en la base: ${C.dateText}</span>`;
-    t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.tipo ? ' · <b>' + TIPO_LABEL[F.tipo] + '</b>' : ''}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
+    t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.cob && F.cob !== 'all' ? ' · <b>' + COB_LABEL[F.cob] + '</b>' : ''}${F.tipo ? ' · <b>' + TIPO_LABEL[F.tipo] + '</b>' : ''}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
     $('#cutBanner').innerHTML = t;
   }
 
@@ -1165,7 +1197,7 @@
     if (!lastR) return;
     const F = lastF, R = lastR, C = F.C;
     const corte = `Corte: ${C.y} · ${C.monthLabel}${C.hasW ? ' · Semana ' + C.w : ''} (último dato ${C.dateText})`;
-    const filt = `${corte}${F.tipo ? ' · ' + TIPO_LABEL[F.tipo] : ''}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
+    const filt = `${corte}${F.cob && F.cob !== 'all' ? ' · ' + COB_LABEL[F.cob] : ''}${F.tipo ? ' · ' + TIPO_LABEL[F.tipo] : ''}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
     if (F.showShare) XLSX.utils.book_append_sheet(wb, sheetFrom(groupsAOA(F, R), 'Venta Paraíso vs Competencia · ' + filt), 'Paraíso vs Competencia');
@@ -1249,7 +1281,7 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
-    ['#fFrom', '#fTipo', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
+    ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
     let tSearch;
     $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(renderStores, 150); });
     $('#fStatus').addEventListener('change', renderStores);

@@ -38,6 +38,15 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 - Filtros: **desde el año**, **cadena** y **marca**.
 - **Descargar Excel**: un libro con las hojas Por año, Por mes, Por semana, Por cadena y Por tienda. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
+## Cobertura
+
+Los archivos traen una columna de cobertura, por ejemplo **COBERTURA** o **COBERTURADO**. La app la detecta sola y entiende valores como SÍ/NO, COBERTURADO/NO COBERTURADO, 1/0 o X.
+
+- **Se guarda todo**, cada fila con su marca de cobertura.
+- **El reporte muestra por defecto solo Coberturados.** El filtro "Cobertura" permite ver también No coberturados, Sin dato o Todos.
+- **Al subir**, cada archivo muestra cuánto de su venta es coberturada. Si un archivo no trae la columna, la app avisa, porque esos datos no aparecerán en "Solo coberturados".
+- **En Datos**, la tabla de la base muestra la venta coberturada de cada año.
+
 ## Venta Paraíso vs Competencia
 
 Cada marca se clasifica en uno de dos grupos:

@@ -70,6 +70,8 @@ async function migrate() {
       unidades  numeric(16,2) NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS ventas_anio_idx ON ${SCHEMA}.ventas (anio);
+    -- Cobertura: 1 = coberturado, 0 = no coberturado, NULL = el archivo no traía el dato.
+    ALTER TABLE ${SCHEMA}.ventas ADD COLUMN IF NOT EXISTS cobertura smallint;
   `);
   const { ADMIN_DNI, ADMIN_PASSWORD, ADMIN_NOMBRE } = process.env;
   if (ADMIN_DNI && ADMIN_PASSWORD) {
@@ -146,10 +148,12 @@ app.get('/api/health', wrap(async (req, res) => { await pool.query('SELECT 1'); 
 // Datos para el reporte (público: cualquiera con el enlace puede ver).
 app.get('/api/data', wrap(async (req, res) => {
   const [ventas, anios, cargas] = await Promise.all([
-    pool.query(`SELECT cadena, tienda, marca, anio, mes, semana, venta::float8 AS v, unidades::float8 AS u FROM ${SCHEMA}.ventas`),
+    pool.query(`SELECT cadena, tienda, marca, anio, mes, semana, venta::float8 AS v, unidades::float8 AS u, cobertura FROM ${SCHEMA}.ventas`),
     pool.query(`SELECT a.anio, a.max_mes, a.max_dia, a.actualizado, c.usuario, c.archivos,
                        (SELECT count(*) FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio)::int AS filas,
-                       (SELECT coalesce(sum(venta), 0)::float8 FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio) AS total
+                       (SELECT coalesce(sum(venta), 0)::float8 FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio) AS total,
+                       (SELECT coalesce(sum(venta), 0)::float8 FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio AND v.cobertura = 1) AS cubierto,
+                       (SELECT count(*) > 0 FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio AND v.cobertura IS NOT NULL) AS con_cobertura
                 FROM ${SCHEMA}.anios a LEFT JOIN ${SCHEMA}.cargas c ON c.id = a.carga_id ORDER BY a.anio`),
     pool.query(`SELECT id, usuario, archivos, anios, filas, total::float8 AS total, creado_en FROM ${SCHEMA}.cargas ORDER BY id DESC LIMIT 20`),
   ]);
@@ -157,7 +161,7 @@ app.get('/api/data', wrap(async (req, res) => {
   const dict = { cadenas: [], tiendas: [], marcas: [] };
   const idx = { cadenas: new Map(), tiendas: new Map(), marcas: new Map() };
   const id = (k, v) => { let i = idx[k].get(v); if (i == null) { i = dict[k].length; dict[k].push(v); idx[k].set(v, i); } return i; };
-  const rows = ventas.rows.map((r) => [id('cadenas', r.cadena), id('tiendas', r.tienda), id('marcas', r.marca), r.anio, r.mes, r.semana, r.v, r.u]);
+  const rows = ventas.rows.map((r) => [id('cadenas', r.cadena), id('tiendas', r.tienda), id('marcas', r.marca), r.anio, r.mes, r.semana, r.v, r.u, r.cobertura]);
   res.set('Cache-Control', 'no-store');
   res.json({ anios: anios.rows, cargas: cargas.rows, dict, rows });
 }));
@@ -181,9 +185,9 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
   const clean = [];
   for (const r of rows) {
     if (!Array.isArray(r) || r.length < 8) return res.status(400).json({ error: 'Formato de datos no válido.' });
-    const [cad, tie, mar, y, m, w, v, u] = r;
+    const [cad, tie, mar, y, m, w, v, u, cob] = r;
     if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !isFinite(v)) return res.status(400).json({ error: `Fila no válida: ${JSON.stringify(r).slice(0, 120)}` });
-    clean.push([String(cad).slice(0, 200), String(tie).slice(0, 200), String(mar ?? '').slice(0, 120), +y, +m, +w, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
+    clean.push([String(cad).slice(0, 200), String(tie).slice(0, 200), String(mar ?? '').slice(0, 120), +y, +m, +w, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100, cob === 1 || cob === 0 ? cob : null]);
   }
   const total = clean.reduce((t, r) => t + r[6], 0);
   const years = [...yearSet].sort();
@@ -198,9 +202,9 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
       const chunk = clean.slice(i, i + 5000);
       const col = (k) => chunk.map((r) => r[k]);
       await client.query(
-        `INSERT INTO ${SCHEMA}.ventas (cadena, tienda, marca, anio, mes, semana, venta, unidades)
-         SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::smallint[], $6::smallint[], $7::numeric[], $8::numeric[])`,
-        [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7)]);
+        `INSERT INTO ${SCHEMA}.ventas (cadena, tienda, marca, anio, mes, semana, venta, unidades, cobertura)
+         SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::smallint[], $6::smallint[], $7::numeric[], $8::numeric[], $9::smallint[])`,
+        [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7), col(8)]);
     }
     for (const a of anios) {
       await client.query(
