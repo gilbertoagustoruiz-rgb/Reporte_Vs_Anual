@@ -7,7 +7,7 @@ Publicada en: https://reporte-vs-anual.onrender.com
 ## Lectura de archivos
 
 - **Sube varios a la vez**: `.xlsx`, `.xls`, `.xlsm`, `.xlsb` y `.csv`/`.txt`. Puede ser un archivo por año o uno solo con todos.
-- **Los archivos no salen de tu equipo**: todo se procesa en el navegador.
+- Los archivos se leen en el navegador. A la base solo van las ventas resumidas.
 - **Detecta las columnas automáticamente**: Venta, Fecha (o Año + Mes, o Año + Semana), Semana, Cadena, Tienda/PDV, Marca y Unidades. Si alguna sale mal, la cambias en la lista y la app recuerda tu elección.
 - **Encuentra la fila de encabezados** aunque haya títulos arriba, y elige la hoja correcta del libro.
 - También lee reportes en **formato ancho** (los meses como columnas). Las filas de TOTAL se omiten.
@@ -35,15 +35,40 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 - Filtros: **desde el año**, **cadena** y **marca**.
 - **Descargar Excel**: un libro con las hojas Por año, Por mes, Por semana, Por cadena y Por tienda. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
+## Base de datos compartida
+
+Los datos se guardan en PostgreSQL (base **Proyectos_Below_Db**, esquema `reporte_vs_anual`), así que todas las personas ven el mismo reporte.
+
+- **Ver**: cualquiera con el enlace, sin iniciar sesión.
+- **Subir y eliminar datos**: solo usuarios con DNI y contraseña. Los administradores crean usuarios desde el botón **Usuarios**.
+- **Al guardar**, cada año que venga en los archivos **reemplaza por completo** a ese año en la base. Así, subir el archivo actualizado de 2026 no duplica las ventas. Cada carga queda registrada: quién, cuándo, qué archivos y qué años.
+- A la base solo se envían las ventas ya resumidas por cadena, tienda, marca, año, mes y semana, no los archivos completos.
+
+### Arquitectura
+
+| Parte | Servicio en Render | Carpeta |
+|---|---|---|
+| Página (sitio estático) | `reporte-vs-anual` → https://reporte-vs-anual.onrender.com | raíz del repo |
+| API (Node + Express) | `reporte-vs-anual-api` → https://reporte-vs-anual-api.onrender.com | `api/` |
+| Base de datos | `Proyectos_Below_Db`, esquema `reporte_vs_anual` | — |
+
+Variables de entorno de la API:
+
+| Variable | Para qué |
+|---|---|
+| `DATABASE_URL` | *Internal Database URL* de Proyectos_Below_Db |
+| `SESSION_SECRET` | Clave para firmar las sesiones |
+| `ADMIN_DNI`, `ADMIN_PASSWORD`, `ADMIN_NOMBRE` | Primer administrador; se crea al iniciar si no existe. La contraseña debe tener al menos 8 caracteres y se puede cambiar luego desde la app |
+| `ALLOWED_ORIGINS` | Dominios que pueden usar la API (por defecto, la página publicada) |
+
+Las tablas se crean solas al iniciar la API: `usuarios`, `cargas`, `anios` y `ventas`.
+
+La API está en el plan gratuito de Render. Si nadie la usa por un rato entra en reposo, y la primera carga siguiente puede tardar hasta un minuto.
+
 ## Cómo usarla en tu computadora
 
-No necesita instalación. Abre una terminal en la carpeta del proyecto y ejecuta:
-
-```bash
-python -m http.server 8000
-```
-
-Luego entra a http://localhost:8000.
+1. API: en `api/`, ejecuta `npm install` y luego `npm start`, con las variables de entorno de arriba (la API queda en http://localhost:3000).
+2. Página: en la raíz, ejecuta `python -m http.server 8000` y entra a http://localhost:8000. En local, la página usa la API de `localhost:3000`.
 
 ## Publicarla en Render
 

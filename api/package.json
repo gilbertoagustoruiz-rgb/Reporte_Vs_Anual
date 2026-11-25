@@ -1,0 +1,19 @@
+{
+  "name": "reporte-vs-anual-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API del Reporte Vs Anual: guarda las ventas en PostgreSQL para que todos vean el mismo reporte",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "compression": "^1.8.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

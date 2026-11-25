@@ -23,44 +23,62 @@
       <button class="tab" data-view="cadena" role="tab">Por cadena</button>
       <button class="tab" data-view="tienda" role="tab">Por tienda</button>
     </nav>
-    <label class="btn btn-primary upload-btn">
-      Subir archivos
-      <input type="file" id="fileInputTop" multiple accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
-    </label>
+    <div class="userbox" id="userBox"></div>
   </header>
 
   <main>
     <!-- ============ DATOS ============ -->
     <section id="view-datos" class="view active">
+      <div id="serverStatus" class="server-status" hidden></div>
+
+      <div id="baseCard" class="card">
+        <div class="card-head">
+          <h2>Datos guardados en la base</h2>
+          <div class="actions"><button class="btn" id="btnReload">Actualizar</button><button class="btn btn-primary" id="btnGoCompare">Ver evaluación →</button></div>
+        </div>
+        <p class="muted small">Esto es lo que ven todas las personas que abren el reporte.</p>
+        <div class="table-wrap"><table id="tblBase" class="tbl"></table></div>
+        <details class="history"><summary>Últimas cargas</summary><div class="table-wrap"><table id="tblCargas" class="tbl"></table></div></details>
+      </div>
+
+      <div id="loginHint" class="card login-hint">
+        <b>¿Quieres subir o actualizar datos?</b> Inicia sesión con tu DNI y contraseña.
+        <button class="btn btn-primary" data-open-login>Iniciar sesión</button>
+      </div>
+
+      <div id="uploadArea" hidden>
       <div id="dropzone" class="dropzone">
         <div class="dz-icon">⬆</div>
         <p class="dz-title">Arrastra aquí tus archivos de ventas</p>
         <p class="dz-hint">Excel (.xlsx, .xls, .xlsm), Excel binario (.xlsb) o CSV · puedes subir varios a la vez (por ejemplo, uno por año desde 2022)</p>
+        <p class="dz-hint"><b>Al guardar, cada año que venga en los archivos reemplaza por completo a ese año en la base.</b></p>
         <label class="btn btn-primary">
           Elegir archivos
           <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
         </label>
-        <p class="dz-privacy">Los archivos se leen en tu navegador: no se envían a ningún servidor.</p>
+        <p class="dz-privacy">Los archivos se leen en tu navegador; a la base solo se envían las ventas ya resumidas por cadena, tienda, marca, mes y semana.</p>
       </div>
 
       <div id="loading" class="loading" hidden><span class="spinner"></span><span id="loadingText">Leyendo archivo…</span></div>
 
       <div id="filesPanel" class="card" hidden>
         <div class="card-head">
-          <h2>Archivos cargados</h2>
+          <h2>Archivos por guardar</h2>
           <div class="actions">
             <button class="btn" id="btnClear">Quitar todos</button>
-            <button class="btn btn-primary" id="btnGoCompare">Ver evaluación →</button>
+            <button class="btn btn-primary" id="btnSave">Guardar en la base</button>
           </div>
         </div>
+        <p class="staging-info" id="stagingInfo"></p>
         <p class="muted small">Revisa que cada columna esté bien detectada. Si algo no cuadra, cámbialo en la lista y se recalcula al momento.</p>
         <div id="filesList"></div>
+      </div>
       </div>
     </section>
 
     <!-- ============ BARRA COMÚN DE ANÁLISIS ============ -->
     <div id="analysis" hidden>
-      <div class="empty-state" data-empty>Sube al menos un archivo en <b>Datos</b> para ver la evaluación.</div>
+      <div class="empty-state" data-empty>Todavía no hay datos en la base. Inicia sesión y sube los archivos en <b>Datos</b>.</div>
       <div data-content hidden>
         <div class="cut-banner" id="cutBanner"></div>
         <div class="filters card">
@@ -159,6 +177,43 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
+
+  <dialog id="dlgLogin" class="dlg">
+    <form id="formLogin" method="dialog">
+      <h2>Iniciar sesión</h2>
+      <label>DNI<input name="dni" inputmode="numeric" autocomplete="username" required></label>
+      <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" data-error></p>
+      <div class="dlg-actions"><button type="button" class="btn" data-close>Cancelar</button><button class="btn btn-primary" type="submit">Entrar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlgUsers" class="dlg wide">
+    <div>
+      <h2>Usuarios</h2>
+      <div class="table-wrap"><table id="tblUsers" class="tbl"></table></div>
+      <form id="formUser" class="user-form">
+        <h3>Nuevo usuario</h3>
+        <label>DNI<input name="dni" inputmode="numeric" pattern="\d{8,12}" required></label>
+        <label>Nombre<input name="nombre" required></label>
+        <label>Contraseña (mín. 8)<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label class="chk"><input type="checkbox" name="admin"> Administrador</label>
+        <button class="btn btn-primary" type="submit">Crear usuario</button>
+        <p class="form-error" data-error></p>
+      </form>
+      <div class="dlg-actions"><button type="button" class="btn" data-close>Cerrar</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="dlgPassword" class="dlg">
+    <form id="formPassword" method="dialog">
+      <h2>Cambiar contraseña</h2>
+      <label>Contraseña actual<input name="actual" type="password" autocomplete="current-password" required></label>
+      <label>Nueva contraseña (mín. 8)<input name="nueva" type="password" minlength="8" autocomplete="new-password" required></label>
+      <p class="form-error" data-error></p>
+      <div class="dlg-actions"><button type="button" class="btn" data-close>Cancelar</button><button class="btn btn-primary" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
 
   <!-- SheetJS (lee .xlsx, .xls, .xlsb y .csv): se intenta la versión más reciente del CDN oficial y, si no carga, la copia local -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>

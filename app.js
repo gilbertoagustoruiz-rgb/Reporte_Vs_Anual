@@ -320,6 +320,7 @@
     const years = new Set();
     let total = 0;
     let maxStamp = 0, maxDate = null;
+    const maxByYear = {};
     const wide = mp.venta == null ? detectWideColumns(f.headers, mp) : [];
     f.wide = wide.length >= 2;
     f.error = null;
@@ -341,6 +342,7 @@
         if (v) {
           const stamp = y * 10000 + m * 100 + (d || 0);
           if (stamp > maxStamp) { maxStamp = stamp; maxDate = { y, m, d, w: w || 0 }; }
+          if (!maxByYear[y] || stamp > maxByYear[y].stamp) maxByYear[y] = { stamp, m, d };
         }
       };
       for (const r of rows) {
@@ -387,47 +389,172 @@
       if (!f.wide && mp.tienda == null) warnings.push('No hay columna de tienda: el detalle por tienda saldrá agrupado.');
       if (f.wide && mp.anio == null && mp.mes == null && mp.fecha == null) warnings.push(`Formato ancho: ${wide.length} columnas de mes detectadas como ventas.`);
     }
-    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate });
+    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear });
   }
 
-  function rebuildAll() {
+  // ---------------------------------------------------------------- servidor (base de datos)
+  const API = new URLSearchParams(location.search).get('api')
+    || (location.hostname.endsWith('onrender.com') ? 'https://reporte-vs-anual-api.onrender.com' : 'http://localhost:3000');
+  const session = { token: store.get('token', null), user: store.get('user', null) };
+
+  async function api(path, opts = {}) {
+    const headers = { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(session.token ? { Authorization: 'Bearer ' + session.token } : {}) };
+    let res;
+    try { res = await fetch(API + path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined }); }
+    catch { throw new Error('No se pudo conectar con el servidor.'); }
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && session.token && path !== '/api/login') { setSession(null); }
+    if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+    return data;
+  }
+
+  function setSession(s) {
+    session.token = s ? s.token : null;
+    session.user = s ? s.user : null;
+    store.set('token', session.token); store.set('user', session.user);
+    renderSession();
+  }
+
+  function renderSession() {
+    const u = session.user;
+    $('#userBox').innerHTML = u
+      ? `<span class="who">👤 ${esc(u.nombre)}</span>${u.admin ? '<button class="btn btn-ghost" id="btnUsers">Usuarios</button>' : ''}<button class="btn btn-ghost" id="btnPwd">Contraseña</button><button class="btn btn-ghost" id="btnLogout">Salir</button>`
+      : `<button class="btn btn-primary" data-open-login>Iniciar sesión</button>`;
+    $('#uploadArea').hidden = !u;
+    $('#loginHint').hidden = !!u;
+    renderBase();
+  }
+
+  let serverData = null;
+  async function loadServer() {
+    const st = $('#serverStatus');
+    st.hidden = false; st.className = 'server-status';
+    st.innerHTML = '<span class="spinner"></span> Cargando los datos de la base… (si el servidor estaba en reposo puede tardar hasta un minuto)';
+    try {
+      serverData = await api('/api/data');
+      applyServerData(serverData);
+      st.hidden = true;
+    } catch (e) {
+      st.className = 'server-status err';
+      st.innerHTML = `${esc(e.message)} <button class="btn" id="btnRetry">Reintentar</button>`;
+      $('#btnRetry').onclick = loadServer;
+    }
+  }
+
+  function applyServerData(D) {
+    const { dict } = D;
+    const records = D.rows.map(([ci, ti, mi, y, m, w, v, u]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], y, m, w, v, u }));
+    const years = [...new Set(records.filter((r) => r.v).map((r) => r.y))].sort((a, b) => a - b);
+    const weekYears = new Set(records.filter((r) => r.w > 0 && r.v).map((r) => r.y));
+    let cut = null;
+    const lastInfo = D.anios.filter((a) => years.includes(a.anio)).pop();
+    if (lastInfo) {
+      const y = lastInfo.anio;
+      // Corte de evaluación: siempre el último año, mes y semana con venta en la base.
+      cut = {
+        y, d: lastInfo.max_dia,
+        m: Math.max(...records.filter((r) => r.y === y && r.v).map((r) => r.m)),
+        w: Math.max(0, ...records.filter((r) => r.y === y && r.w > 0 && r.v).map((r) => r.w)),
+      };
+      if (cut.m !== lastInfo.max_mes) cut.d = null;
+    }
+    Object.assign(state, { records, years, cut, weekYears, hasBrand: records.some((r) => r.marca) });
+    syncFilterOptions();
+    renderFiles();
+    renderBase();
+    renderAll();
+  }
+
+  function renderBase() {
+    const D = serverData;
+    if (!D) return;
+    const logged = !!session.user;
+    const rows = D.anios.map((a) => `<tr>
+      <td><b>${a.anio}</b></td>
+      <td>${a.max_dia ? `${String(a.max_dia).padStart(2, '0')}/${String(a.max_mes).padStart(2, '0')}/${a.anio}` : `${MESES_LARGO[a.max_mes - 1]} ${a.anio}`}</td>
+      <td class="num">${num(a.filas)}</td>
+      <td class="num">${money(a.total)}</td>
+      <td>${esc(a.usuario || '—')}</td>
+      <td>${new Date(a.actualizado).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+      <td class="muted small">${esc((a.archivos || []).join(', '))}</td>
+      ${logged ? `<td><button class="btn btn-danger" data-del-year="${a.anio}">Eliminar</button></td>` : ''}
+    </tr>`).join('');
+    $('#tblBase').innerHTML = `<thead><tr><th>Año</th><th>Último dato</th><th class="num">Registros</th><th class="num">Venta</th><th>Subido por</th><th>Actualizado</th><th>Archivos</th>${logged ? '<th></th>' : ''}</tr></thead>
+      <tbody>${rows || `<tr><td colspan="8" class="muted">La base todavía está vacía.</td></tr>`}</tbody>`;
+    $('#tblCargas').innerHTML = `<thead><tr><th>Fecha</th><th>Usuario</th><th>Años</th><th class="num">Registros</th><th class="num">Venta</th><th>Archivos</th></tr></thead><tbody>${
+      D.cargas.map((c) => `<tr><td>${new Date(c.creado_en).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${esc(c.usuario || '—')}</td><td>${c.anios.join(', ')}</td><td class="num">${num(c.filas)}</td><td class="num">${money(c.total)}</td><td class="muted small">${esc(c.archivos.join(', '))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin cargas.</td></tr>'}</tbody>`;
+  }
+
+  // Archivos por guardar (aún no están en la base).
+  function stagingPayload() {
+    const ok = state.files.filter((f) => !f.error);
     const agg = new Map();
-    let hasBrand = false, hasStore = false;
-    for (const f of state.files) {
-      if (f.error) continue;
-      if (f.mapping.marca != null) hasBrand = true;
-      if (f.mapping.tienda != null) hasStore = true;
+    const maxY = {};
+    for (const f of ok) {
       for (const [k, o] of f.agg) {
         const cur = agg.get(k);
         if (cur) { cur.v += o.v; cur.u += o.u; } else agg.set(k, { v: o.v, u: o.u });
       }
+      for (const y in f.maxByYear) { const a = f.maxByYear[y]; if (!maxY[y] || a.stamp > maxY[y].stamp) maxY[y] = a; }
     }
-    const years = new Set();
-    const records = [];
+    const rows = [];
+    let total = 0;
     for (const [k, o] of agg) {
-      const [cadena, tienda, marca, y, m, w] = k.split('\u0001');
-      const rec = { cadena, tienda, marca, y: +y, m: +m, w: +w, v: o.v, u: o.u };
-      records.push(rec);
-      if (o.v) years.add(rec.y);
+      const [c, t, m, y, mo, w] = k.split('\u0001');
+      rows.push([c, t, m, +y, +mo, +w, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100]);
+      total += o.v;
     }
-    // Corte de evaluación: siempre el último año, mes y semana con venta en los archivos.
-    let cut = null;
-    for (const f of state.files) {
-      const md = f.error ? null : f.maxDate;
-      if (!md) continue;
-      if (!cut || md.y * 10000 + md.m * 100 + (md.d || 0) > cut.y * 10000 + cut.m * 100 + (cut.d || 0)) cut = { ...md };
-    }
-    const weekYears = new Set(records.filter((r) => r.w > 0 && r.v).map((r) => r.y));
-    if (cut) {
-      // Semana de corte: la más alta con venta en el último año (si hay datos semanales).
-      const wMax = Math.max(0, ...records.filter((r) => r.y === cut.y && r.w > 0 && r.v).map((r) => r.w));
-      cut.w = wMax;
-      cut.m = Math.max(...records.filter((r) => r.y === cut.y && r.v).map((r) => r.m));
-    }
-    Object.assign(state, { records, years: [...years].sort((a, b) => a - b), hasBrand, hasStore, cut, weekYears });
-    syncFilterOptions();
+    const anios = Object.keys(maxY).map((y) => ({ anio: +y, max_mes: maxY[y].m, max_dia: maxY[y].d })).sort((a, b) => a.anio - b.anio);
+    return { archivos: ok.map((f) => f.name), anios, rows, total };
+  }
+
+  function rebuildAll() {
     renderFiles();
-    renderAll();
+    const P = stagingPayload();
+    const exist = new Set((serverData?.anios || []).map((a) => a.anio));
+    const rep = P.anios.filter((a) => exist.has(a.anio)).map((a) => a.anio);
+    $('#stagingInfo').innerHTML = P.anios.length
+      ? `Se guardarán los años <b>${P.anios.map((a) => a.anio).join(', ')}</b> (${money(P.total)}).` + (rep.length ? ` Ya existen en la base y se reemplazarán: <b>${rep.join(', ')}</b>.` : '')
+      : '';
+    $('#btnSave').disabled = !P.rows.length;
+  }
+
+  async function saveToBase() {
+    const P = stagingPayload();
+    if (!P.rows.length) return;
+    const exist = new Set((serverData?.anios || []).map((a) => a.anio));
+    const rep = P.anios.filter((a) => exist.has(a.anio)).map((a) => a.anio);
+    if (rep.length && !confirm(`Los años ${rep.join(', ')} ya están en la base y se reemplazarán por completo con estos archivos. ¿Continuar?`)) return;
+    const btn = $('#btnSave');
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/cargas', { method: 'POST', body: { archivos: P.archivos, anios: P.anios, rows: P.rows } });
+      toast(`Guardado: años ${r.anios.join(', ')} · ${num(r.filas)} registros.`);
+      state.files = [];
+      rebuildAll();
+      await loadServer();
+      setView('anual');
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btn.textContent = 'Guardar en la base'; btn.disabled = false;
+    }
+  }
+
+  async function deleteYear(y) {
+    if (!confirm(`¿Eliminar todos los datos del año ${y} de la base? Esto no se puede deshacer.`)) return;
+    try { await api('/api/anios/' + y, { method: 'DELETE' }); toast(`Año ${y} eliminado.`); await loadServer(); }
+    catch (e) { toast(e.message); }
+  }
+
+  async function openUsers() {
+    const dlg = $('#dlgUsers');
+    $('[data-error]', dlg).textContent = '';
+    try {
+      const { usuarios } = await api('/api/usuarios');
+      $('#tblUsers').innerHTML = `<thead><tr><th>DNI</th><th>Nombre</th><th>Rol</th><th></th></tr></thead><tbody>${usuarios.map((u) => `<tr><td>${esc(u.dni)}</td><td>${esc(u.nombre)}</td><td>${u.es_admin ? 'Administrador' : 'Usuario'}</td><td>${u.dni === session.user.dni ? '' : `<button class="btn btn-danger" data-del-user="${esc(u.dni)}">Eliminar</button>`}</td></tr>`).join('')}</tbody>`;
+      if (!dlg.open) dlg.showModal();
+    } catch (e) { toast(e.message); }
   }
 
   async function handleFiles(list) {
@@ -783,7 +910,7 @@
     const { C } = F;
     const parts = [`<b>Año ${C.y}</b>`, `<b>${C.monthLabel}</b>`];
     if (C.hasW) parts.push(`<b>Semana ${C.w}</b>`);
-    let t = `<span class="cut-tag">Corte de evaluación</span> ${parts.join(' · ')} <span class="muted">— último dato en los archivos: ${C.dateText}</span>`;
+    let t = `<span class="cut-tag">Corte de evaluación</span> ${parts.join(' · ')} <span class="muted">— último dato en la base: ${C.dateText}</span>`;
     t += `<span class="cut-years">Años evaluados: ${F.years.join(', ')}${F.chain ? ' · Cadena: ' + esc(F.chain) : ''}${F.brand ? ' · Marca: ' + esc(F.brand) : ''}</span>`;
     $('#cutBanner').innerHTML = t;
   }
@@ -922,12 +1049,52 @@
     state.sort = { chains: { key: 'y0', dir: -1 }, stores: { key: 'y0', dir: -1 } };
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
     $('#btnGoCompare').addEventListener('click', () => setView('anual'));
-    ['#fileInput', '#fileInputTop'].forEach((s) => $(s).addEventListener('change', (e) => { if (s === '#fileInputTop') setView('datos'); handleFiles(e.target.files).then(() => { e.target.value = ''; }); }));
+    $('#fileInput').addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); });
+    $('#btnSave').addEventListener('click', saveToBase);
+    $('#btnReload').addEventListener('click', loadServer);
+    $('#tblBase').addEventListener('click', (e) => { const b = e.target.closest('[data-del-year]'); if (b) deleteYear(+b.dataset.delYear); });
+
+    // Sesión y usuarios
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('[data-open-login]')) { const d = $('#dlgLogin'); $('[data-error]', d).textContent = ''; d.showModal(); }
+      if (e.target.closest('[data-close]')) e.target.closest('dialog').close();
+      if (e.target.closest('#btnLogout')) { setSession(null); toast('Sesión cerrada.'); }
+      if (e.target.closest('#btnUsers')) openUsers();
+      if (e.target.closest('#btnPwd')) { const d = $('#dlgPassword'); d.querySelector('form').reset(); $('[data-error]', d).textContent = ''; d.showModal(); }
+    });
+    $('#formLogin').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target), err = $('[data-error]', e.target);
+      err.textContent = '';
+      try {
+        const r = await api('/api/login', { method: 'POST', body: { dni: fd.get('dni'), password: fd.get('password') } });
+        setSession(r); e.target.reset(); $('#dlgLogin').close(); toast(`Hola, ${r.user.nombre}.`);
+      } catch (x) { err.textContent = x.message; }
+    });
+    $('#formPassword').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target), err = $('[data-error]', e.target);
+      try { await api('/api/password', { method: 'POST', body: { actual: fd.get('actual'), nueva: fd.get('nueva') } }); $('#dlgPassword').close(); toast('Contraseña actualizada.'); }
+      catch (x) { err.textContent = x.message; }
+    });
+    $('#formUser').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target), err = $('[data-error]', e.target);
+      err.textContent = '';
+      try { await api('/api/usuarios', { method: 'POST', body: { dni: fd.get('dni'), nombre: fd.get('nombre'), password: fd.get('password'), admin: !!fd.get('admin') } }); e.target.reset(); toast('Usuario creado.'); openUsers(); }
+      catch (x) { err.textContent = x.message; }
+    });
+    $('#tblUsers').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-del-user]');
+      if (!b || !confirm(`¿Eliminar el usuario con DNI ${b.dataset.delUser}?`)) return;
+      try { await api('/api/usuarios/' + encodeURIComponent(b.dataset.delUser), { method: 'DELETE' }); openUsers(); }
+      catch (x) { toast(x.message); }
+    });
 
     const dz = $('#dropzone');
     ['dragenter', 'dragover'].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('over'); }));
     ['dragleave', 'drop'].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'drop' || e.target === document.documentElement) dz.classList.remove('over'); }));
-    document.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) { setView('datos'); handleFiles(e.dataTransfer.files); } });
+    document.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length && session.user) { setView('datos'); handleFiles(e.dataTransfer.files); } });
 
     $('#filesList').addEventListener('change', onFilesPanelChange);
     $('#filesList').addEventListener('click', (e) => {
@@ -954,6 +1121,10 @@
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
     renderFiles();
+    renderSession();
+    loadServer();
+    // Comprueba que la sesión guardada siga siendo válida.
+    if (session.token) api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); }).catch(() => {});
   }
 
   // Exponer funciones de parseo para pruebas automáticas.
