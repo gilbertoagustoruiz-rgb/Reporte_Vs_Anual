@@ -758,9 +758,6 @@
     // Marca: muestra a qué grupo pertenece cada una.
     $('#fBrand').innerHTML = [['', 'Todas'], ...brands.map((c) => [c, `${c} · ${tipoDe(c) === 'paraiso' ? 'Paraíso' : 'Competencia'}`])].map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
     if (brands.includes(this_brand)) $('#fBrand').value = this_brand;
-    const weekOpt = $('#fMeasure option[value="week"]');
-    weekOpt.disabled = !(state.cut && state.cut.w);
-    if (weekOpt.disabled && $('#fMeasure').value === 'week') $('#fMeasure').value = 'ytd';
   }
 
   // ---------------------------------------------------------------- marcas: venta Paraíso vs competencia
@@ -785,7 +782,6 @@
   };
 
   // ---------------------------------------------------------------- cálculos
-  const MEASURES = { ytd: 'Acumulado al corte', full: 'Año completo', month: 'Mes de corte', week: 'Semana de corte' };
 
   function cutInfo() {
     const c = state.cut;
@@ -808,7 +804,7 @@
     const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo) && cobOk(r));
     // La participación Paraíso solo tiene sentido viendo todas las marcas.
     const showShare = state.hasBrand && !tipo && !brand;
-    return { C, from, years, chain, brand, tipo, cob, showShare, recs, measure: $('#fMeasure').value };
+    return { C, from, years, chain, brand, tipo, cob, showShare, recs };
   }
 
   const blank = () => ({ full: 0, ytd: 0, month: 0, week: 0 });
@@ -897,102 +893,6 @@
     return { head, rows, foot: [], types, varCols: [2, 4, 6] };
   }
 
-  function monthsAOA(F, R) {
-    const { C } = F;
-    const ys = F.years, last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
-    const head = ['Mes', ...ys.map(String)];
-    const types = ['t', ...ys.map(() => '$')];
-    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, `Var % ${last} vs ${prev}`); types.push('$', '%'); }
-    const rows = [];
-    for (let m = 1; m <= 12; m++) {
-      const vals = ys.map((y) => (y === last && m > C.m ? null : R.byYM.get(y * 100 + m) || 0));
-      const row = [MESES_LARGO[m - 1] + (m === C.m ? ' (corte)' : ''), ...vals];
-      if (prev) {
-        const b = m > C.m ? null : R.byYM.get(last * 100 + m) || 0, a = R.byYM.get(prev * 100 + m) || 0;
-        row.push(b == null ? null : b - a, b == null ? null : varPct(b, a));
-      }
-      rows.push(row);
-    }
-    const ytdRow = ['Acumulado al corte', ...ys.map((y) => R.byYear.get(y).ytd)];
-    const fullRow = ['Año completo', ...ys.map((y) => R.byYear.get(y).full)];
-    if (prev) {
-      const a = R.byYear.get(prev), b = R.byYear.get(last);
-      ytdRow.push(b.ytd - a.ytd, varPct(b.ytd, a.ytd));
-      fullRow.push(null, null);
-    }
-    const n = head.length;
-    return { head, rows, foot: [ytdRow, fullRow], types, varCols: prev ? [n - 2, n - 1] : [] };
-  }
-
-  function weeksAOA(F, R) {
-    const { C } = F;
-    const ys = F.years.filter((y) => state.weekYears.has(y)), last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
-    const head = ['Semana', ...ys.map(String)];
-    const types = ['t', ...ys.map(() => '$')];
-    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, `Var % ${last} vs ${prev}`); types.push('$', '%'); }
-    const rows = [];
-    const maxW = Math.max(R.maxW, C.w || 0);
-    for (let w = 1; w <= maxW; w++) {
-      const row = [`Semana ${w}` + (w === C.w ? ' (corte)' : ''), ...ys.map((y) => ((y === last && w > C.w) || w > weekOf(y, 12, 31) ? null : R.byYW.get(y * 100 + w) || 0))];
-      if (prev) {
-        const b = w > C.w ? null : R.byYW.get(last * 100 + w) || 0, a = R.byYW.get(prev * 100 + w) || 0;
-        row.push(b == null ? null : b - a, b == null ? null : varPct(b, a));
-      }
-      rows.push(row);
-    }
-    const sumTo = (y, lim) => { let t = 0; for (let w = 1; w <= lim; w++) t += R.byYW.get(y * 100 + w) || 0; return t; };
-    const ytdRow = [`Acumulado sem 1–${C.w}`, ...ys.map((y) => sumTo(y, C.w))];
-    if (prev) { const b = sumTo(last, C.w), a = sumTo(prev, C.w); ytdRow.push(b - a, varPct(b, a)); }
-    const n = head.length;
-    return { head, rows, foot: [ytdRow], types, varCols: prev ? [n - 2, n - 1] : [], ys };
-  }
-
-  function entityAOA(F, R, kind) {
-    const { C, measure } = F;
-    const ys = F.years, last = C.y, prev = ys.includes(last - 1) ? last - 1 : null;
-    const isStore = kind === 'stores';
-    const list = [...(isStore ? R.byStore : R.byChain).values()];
-    const val = (o, y) => (o.y[y] ? o.y[y][measure] : 0);
-    const totLast = list.reduce((t, o) => t + val(o, last), 0);
-    let items = list.map((o) => {
-      const b = val(o, last), a = prev ? val(o, prev) : 0;
-      const pb = o.yp[last] ? o.yp[last][measure] : 0;
-      return { o, b, a, d: b - a, p: varPct(b, a), st: statusOf(a, b), share: totLast ? b / totLast : null, pShare: b > 0 ? pb / b : null };
-    }).filter((x) => ys.some((y) => val(x.o, y)));
-    if (isStore) {
-      const q = norm($('#fSearch').value), st = $('#fStatus').value;
-      if (q) items = items.filter((x) => norm(x.o.tienda).includes(q) || norm(x.o.cadena).includes(q));
-      if (st) items = items.filter((x) => x.st === st);
-    }
-    const sort = state.sort[kind];
-    const key = (x) => (sort.key === 'name' ? (isStore ? x.o.tienda : x.o.cadena) : sort.key === 'cadena' ? x.o.cadena : sort.key.startsWith('y') ? val(x.o, +sort.key.slice(1)) : x[sort.key]);
-    items.sort((x, y) => {
-      const a = key(x), b = key(y);
-      if (a == null) return 1; if (b == null) return -1;
-      return (typeof a === 'string' ? a.localeCompare(b, 'es') : a - b) * sort.dir;
-    });
-    const head = [...(isStore ? ['Cadena', 'Tienda'] : ['Cadena']), ...ys.map(String)];
-    const keys = [...(isStore ? ['cadena', 'name'] : ['name']), ...ys.map((y) => 'y' + y)];
-    const types = [...(isStore ? ['t', 't'] : ['t']), ...ys.map(() => '$')];
-    if (prev) { head.push(`Var S/ ${last} vs ${prev}`, 'Var %', 'Estado'); keys.push('d', 'p', 'st'); types.push('$', '%', 't'); }
-    head.push(`Part. ${last}`); keys.push('share'); types.push('p');
-    if (F.showShare) { head.push(`Part. Paraíso ${last}`); keys.push('pShare'); types.push('p'); }
-    const rows = items.map((x) => {
-      const r = [...(isStore ? [x.o.cadena, x.o.tienda] : [x.o.cadena]), ...ys.map((y) => val(x.o, y))];
-      if (prev) r.push(x.d, x.p, STATUS_LABEL[x.st].replace(/^\S+\s/, ''));
-      r.push(x.share);
-      if (F.showShare) r.push(x.pShare);
-      return r;
-    });
-    const sums = ys.map((y) => items.reduce((t, x) => t + val(x.o, y), 0));
-    const tot = [...(isStore ? ['Total', `${num(items.length)} tiendas`] : [`Total (${num(items.length)})`]), ...sums];
-    if (prev) { const b = sums[ys.indexOf(last)], a = sums[ys.indexOf(prev)]; tot.push(b - a, varPct(b, a), ''); }
-    tot.push(totLast && items.length ? sums[ys.indexOf(last)] / totLast : null);
-    if (F.showShare) { const pb = items.reduce((t, x) => t + (x.o.yp[last] ? x.o.yp[last][measure] : 0), 0), b = sums[ys.indexOf(last)]; tot.push(b > 0 ? pb / b : null); }
-    const iD = keys.indexOf('d');
-    return { head, rows, foot: [tot], types, keys, items, varCols: prev ? [iD, iD + 1] : [], stCol: prev ? keys.indexOf('st') : -1 };
-  }
-
   // ---------------------------------------------------------------- render
   let lastF = null, lastR = null;
 
@@ -1032,10 +932,6 @@
     const F = currentFilters();
     const R = compute(F);
     lastF = F; lastR = R;
-    for (const k of ['chains', 'stores']) {
-      const sk = state.sort[k].key;
-      if (sk === 'y0' || (sk.startsWith('y') && !F.years.includes(+sk.slice(1)))) state.sort[k] = { key: 'y' + F.C.y, dir: -1 };
-    }
     renderBanner(F);
     renderKpis(F, R);
     renderYearCharts(F, R);
@@ -1043,29 +939,7 @@
     $('#groupsCard').hidden = !F.showShare;
     if (F.showShare) { renderTable('tblGroups', groupsAOA(F, R)); renderGroupChart(F, R); }
     $('#noteYears').textContent = `* ${F.C.y} es el año en curso: su "Año completo" llega solo hasta el corte, por eso no se compara con el año anterior. El acumulado de cada año se calcula hasta el mismo punto (${F.C.hasW ? 'semana ' + F.C.w : MESES_LARGO[F.C.m - 1]}) para comparar en igualdad de condiciones.` + (F.C.hasW && F.years.some((y) => !state.weekYears.has(y)) ? ' Los años sin fecha diaria se acumulan hasta el mes de corte completo.' : '');
-    renderLines('chartMonths', 'm', F, R, MESES, (y, i) => (y === F.C.y && i + 1 > F.C.m ? null : R.byYM.get(y * 100 + i + 1) || 0), F.years);
-    renderTable('tblMonths', monthsAOA(F, R));
-    $('#noteMonths').textContent = F.C.hasW ? `El mes de corte (${MESES_LARGO[F.C.m - 1]}) de ${F.C.y} está incompleto: llega hasta el ${F.C.dateText}.` : '';
-    const hasWeeks = F.C.hasW && F.years.some((y) => state.weekYears.has(y));
-    $('#noWeeks').hidden = hasWeeks;
-    $('#weeksContent').hidden = !hasWeeks;
-    if (hasWeeks) {
-      const W = weeksAOA(F, R);
-      const maxW = Math.max(R.maxW, F.C.w);
-      renderLines('chartWeeks', 'w', F, R, Array.from({ length: maxW }, (_, i) => 'S' + (i + 1)), (y, i) => ((y === F.C.y && i + 1 > F.C.w) || i + 1 > weekOf(y, 12, 31) ? null : R.byYW.get(y * 100 + i + 1) || 0), W.ys);
-      renderTable('tblWeeks', W);
-    }
-    $('#chainMeasure').textContent = '· ' + MEASURES[F.measure] + (F.measure === 'ytd' ? ` (${F.C.ytdLabel(F.C.y)})` : F.measure === 'month' ? ` (${F.C.monthLabel})` : F.measure === 'week' ? ` (semana ${F.C.w})` : '');
-    renderTable('tblChains', entityAOA(F, R, 'chains'), 'chains');
-    renderStores();
     renderCmp();
-  }
-
-  function renderStores() {
-    if (!lastR) return;
-    const T = entityAOA(lastF, lastR, 'stores');
-    renderTable('tblStores', T, 'stores');
-    $('#storeCount').textContent = `· ${MEASURES[lastF.measure]} · ${num(T.items.length)} tiendas`;
   }
 
   function renderBanner(F) {
@@ -1153,28 +1027,6 @@
           } },
         },
         scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
-      },
-    });
-  }
-
-  function renderLines(canvasId, key, F, R, labels, getter, years) {
-    const legendHtml = [...years].reverse().map((y) => `<span><i class="swatch" style="background:${yearColor(y)}"></i>${y}</span>`).join('');
-    $$('[data-legend]', $('#' + canvasId).closest('.card')).forEach((el) => (el.innerHTML = legendHtml));
-    upsertChart(key, canvasId, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: years.map((y) => ({
-          label: String(y), data: labels.map((_, i) => getter(y, i)),
-          borderColor: yearColor(y), backgroundColor: yearColor(y),
-          borderWidth: y === F.C.y ? 3 : 2, pointRadius: labels.length > 20 ? 0 : 3, pointHoverRadius: 5, tension: labels.length > 20 ? 0 : 0.25, spanGaps: false,
-        })),
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
-        interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { itemSort: (a, b) => +b.dataset.label - +a.dataset.label, callbacks: { label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
-        scales: { x: { grid: { display: false }, ticks: { color: TICK, autoSkip: true, maxRotation: 0 } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
       },
     });
   }
@@ -1386,7 +1238,7 @@
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
     const F = lastF, R = lastR;
-    return { cmpSoles: () => cmpAOA('v'), cmpUnd: () => cmpAOA('u'), cmpWeek: () => weekAOA('v'), cmpWeekUnd: () => weekAOA('u'), groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
+    return { cmpSoles: () => cmpAOA('v'), cmpUnd: () => cmpAOA('u'), cmpWeek: () => weekAOA('v'), cmpWeekUnd: () => weekAOA('u'), groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R) }[id]();
   }
   async function copyTable(id) {
     const T = aoaFor(id);
@@ -1429,10 +1281,6 @@
     }
     XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
     if (F.showShare) XLSX.utils.book_append_sheet(wb, sheetFrom(groupsAOA(F, R), 'Venta Paraíso vs Competencia · ' + filt), 'Paraíso vs Competencia');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(monthsAOA(F, R), 'Meses × años · ' + filt), 'Por mes');
-    if (C.hasW && F.years.some((y) => state.weekYears.has(y))) XLSX.utils.book_append_sheet(wb, sheetFrom(weeksAOA(F, R), 'Semanas × años · ' + filt), 'Por semana');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(entityAOA(F, R, 'chains'), `Cadenas · ${MEASURES[F.measure]} · ` + filt), 'Por cadena');
-    XLSX.utils.book_append_sheet(wb, sheetFrom(entityAOA(F, R, 'stores'), `Tiendas · ${MEASURES[F.measure]} · ` + filt), 'Por tienda');
     XLSX.writeFile(wb, `Reporte_Vs_Anual_${F.years[0]}-${C.y}${F.chain ? '_' + F.chain.replace(/[^\w]+/g, '_') : ''}.xlsx`);
   }
 
@@ -1443,7 +1291,6 @@
     $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
     $('#analysis').hidden = v === 'datos';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
-    $('#fMeasureWrap').hidden = !(v === 'cadena' || v === 'tienda');
     if (v === 'comparativa') renderCmp();
     Object.values(state.charts).forEach((c) => c.resize());
     window.scrollTo({ top: 0 });
@@ -1451,7 +1298,6 @@
 
   function init() {
     if (!window.XLSX) { document.body.innerHTML = '<p style="padding:40px">No se pudo cargar el lector de Excel. Revisa tu conexión y recarga la página.</p>'; return; }
-    state.sort = { chains: { key: 'y0', dir: -1 }, stores: { key: 'y0', dir: -1 } };
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
     $('#btnGoCompare').addEventListener('click', () => setView('anual'));
     $('#fileInput').addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); });
@@ -1510,19 +1356,7 @@
     });
     $('#btnClear').addEventListener('click', () => { state.files = []; rebuildAll(); });
 
-    ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand', '#fMeasure'].forEach((s) => $(s).addEventListener('change', renderAll));
-    let tSearch;
-    $('#fSearch').addEventListener('input', () => { clearTimeout(tSearch); tSearch = setTimeout(renderStores, 150); });
-    $('#fStatus').addEventListener('change', renderStores);
-    for (const [id, kind] of [['#tblChains', 'chains'], ['#tblStores', 'stores']]) {
-      $(id).addEventListener('click', (e) => {
-        const th = e.target.closest('th[data-sort]');
-        if (!th) return;
-        const k = th.dataset.sort, cur = state.sort[kind];
-        state.sort[kind] = cur.key === k ? { key: k, dir: -cur.dir } : { key: k, dir: ['name', 'cadena', 'st'].includes(k) ? 1 : -1 };
-        kind === 'stores' ? renderStores() : renderTable('tblChains', entityAOA(lastF, lastR, 'chains'), 'chains');
-      });
-    }
+    ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', renderAll));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
     const toggle = (set, v) => (set.has(v) ? set.delete(v) : set.add(v));

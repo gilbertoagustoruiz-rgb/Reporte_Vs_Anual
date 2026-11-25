@@ -34,11 +34,8 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 - **Comparativa**: igual que la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Debajo, **por semana**: tablas de Soles y Unidades con columnas Sem-N × año, más su Var % y el total, y un gráfico de barras por semana para los últimos tres años, con la Var % del año actual frente al anterior sobre cada semana. Usa el detalle diario guardado en la tabla `ventas_dia`.
 
 - **Por año**: indicadores del año en curso frente al anterior (acumulado, mes de corte y semana de corte), gráficos por año y una tabla con todos los años, cada uno con su variación contra el año anterior.
-- **Por mes**: gráfico de líneas con un año por línea y la tabla de meses × años, más la variación del último año contra el anterior.
-- **Por semana**: lo mismo, semana por semana.
-- **Por cadena** y **Por tienda**: todos los años en columnas, con la medida que elijas, la variación del último año contra el anterior, el estado (crece, cae, nueva o sin venta) y la participación. Las columnas se ordenan con un clic y las tiendas se pueden buscar.
 - Filtros: **desde el año**, **cadena** y **marca**.
-- **Descargar Excel**: un libro con las hojas Por año, Por mes, Por semana, Por cadena y Por tienda. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
+- **Descargar Excel**: un libro con las tablas de la Comparativa (soles, unidades y por semana) y de Por año. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
 ## Cobertura
 
@@ -61,7 +58,6 @@ Lo que agrega esta clasificación:
 - **Filtro "Tipo de venta"**: Todas, Solo venta Paraíso o Solo venta Competencia.
 - **En "Por año"**: un gráfico y una tabla de Paraíso frente a Competencia, con la participación de Paraíso en el acumulado al corte, en el mes y la semana de corte y en el año completo. La variación de la participación se muestra en puntos porcentuales (pp).
 - **Indicador** de participación Paraíso.
-- **En "Por cadena" y "Por tienda"**: una columna con la participación Paraíso del último año.
 - **En "Datos"**: la lista de marcas detectadas y el grupo de cada una, para revisarla.
 
 La lista de marcas Paraíso está en `app.js`, en la constante `MARCAS_PARAISO`.
