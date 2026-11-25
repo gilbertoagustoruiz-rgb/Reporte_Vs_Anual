@@ -72,6 +72,19 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS ventas_anio_idx ON ${SCHEMA}.ventas (anio);
     -- Cobertura: 1 = coberturado, 0 = no coberturado, NULL = el archivo no traía el dato.
     ALTER TABLE ${SCHEMA}.ventas ADD COLUMN IF NOT EXISTS cobertura smallint;
+    -- Detalle diario por cadena/marca/cobertura para la vista "Comparativa" (segmentadores Mes/Semana/Día).
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.ventas_dia (
+      anio      int NOT NULL,
+      mes       smallint NOT NULL,
+      semana    smallint NOT NULL DEFAULT 0,
+      dia       smallint NOT NULL DEFAULT 0,
+      cadena    text NOT NULL,
+      marca     text NOT NULL DEFAULT '',
+      cobertura smallint,
+      venta     numeric(16,2) NOT NULL,
+      unidades  numeric(16,2) NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS ventas_dia_anio_idx ON ${SCHEMA}.ventas_dia (anio);
   `);
   const { ADMIN_DNI, ADMIN_PASSWORD, ADMIN_NOMBRE } = process.env;
   if (ADMIN_DNI && ADMIN_PASSWORD) {
@@ -166,6 +179,17 @@ app.get('/api/data', wrap(async (req, res) => {
   res.json({ anios: anios.rows, cargas: cargas.rows, dict, rows });
 }));
 
+// Detalle diario para la vista Comparativa (público, como el resto del reporte).
+app.get('/api/dias', wrap(async (req, res) => {
+  const r = await pool.query(`SELECT cadena, marca, cobertura, anio, mes, semana, dia, venta::float8 AS v, unidades::float8 AS u FROM ${SCHEMA}.ventas_dia`);
+  const dict = { cadenas: [], marcas: [] };
+  const idx = { cadenas: new Map(), marcas: new Map() };
+  const id = (k, v) => { let i = idx[k].get(v); if (i == null) { i = dict[k].length; dict[k].push(v); idx[k].set(v, i); } return i; };
+  const rows = r.rows.map((x) => [id('cadenas', x.cadena), id('marcas', x.marca), x.cobertura, x.anio, x.mes, x.semana, x.dia, x.v, x.u]);
+  res.set('Cache-Control', 'no-store');
+  res.json({ dict, rows });
+}));
+
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const dni = String(req.body?.dni || '').trim(), password = String(req.body?.password || '');
   const r = await pool.query(`SELECT dni, nombre, hash, es_admin FROM ${SCHEMA}.usuarios WHERE dni = $1`, [dni]);
@@ -178,7 +202,7 @@ app.get('/api/me', wrap(auth), (req, res) => res.json({ user: { dni: req.user.dn
 
 // Guardar archivos: reemplaza por completo los años que vienen en la carga.
 app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
-  const { archivos, anios, rows } = req.body || {};
+  const { archivos, anios, rows, dias } = req.body || {};
   if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'No llegaron datos para guardar.' });
   if (!Array.isArray(anios) || !anios.length) return res.status(400).json({ error: 'No llegaron los años de la carga.' });
   const yearSet = new Set(anios.map((a) => +a.anio));
@@ -188,6 +212,13 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
     const [cad, tie, mar, y, m, w, v, u, cob] = r;
     if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !isFinite(v)) return res.status(400).json({ error: `Fila no válida: ${JSON.stringify(r).slice(0, 120)}` });
     clean.push([String(cad).slice(0, 200), String(tie).slice(0, 200), String(mar ?? '').slice(0, 120), +y, +m, +w, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100, cob === 1 || cob === 0 ? cob : null]);
+  }
+  const cleanDias = [];
+  for (const r of Array.isArray(dias) ? dias : []) {
+    if (!Array.isArray(r) || r.length < 9) return res.status(400).json({ error: 'Formato de datos diarios no válido.' });
+    const [cad, mar, cob, y, m, w, d, v, u] = r;
+    if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !(d >= 0 && d <= 31) || !isFinite(v)) return res.status(400).json({ error: `Fila diaria no válida: ${JSON.stringify(r).slice(0, 120)}` });
+    cleanDias.push([String(cad).slice(0, 200), String(mar ?? '').slice(0, 120), cob === 1 || cob === 0 ? cob : null, +y, +m, +w, +d, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
   }
   const total = clean.reduce((t, r) => t + r[6], 0);
   const years = [...yearSet].sort();
@@ -206,6 +237,15 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
          SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::smallint[], $6::smallint[], $7::numeric[], $8::numeric[], $9::smallint[])`,
         [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7), col(8)]);
     }
+    await client.query(`DELETE FROM ${SCHEMA}.ventas_dia WHERE anio = ANY($1::int[])`, [years]);
+    for (let i = 0; i < cleanDias.length; i += 5000) {
+      const chunk = cleanDias.slice(i, i + 5000);
+      const col = (k) => chunk.map((r) => r[k]);
+      await client.query(
+        `INSERT INTO ${SCHEMA}.ventas_dia (cadena, marca, cobertura, anio, mes, semana, dia, venta, unidades)
+         SELECT * FROM unnest($1::text[], $2::text[], $3::smallint[], $4::int[], $5::smallint[], $6::smallint[], $7::smallint[], $8::numeric[], $9::numeric[])`,
+        [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7), col(8)]);
+    }
     for (const a of anios) {
       await client.query(
         `INSERT INTO ${SCHEMA}.anios (anio, max_mes, max_dia, carga_id, actualizado) VALUES ($1, $2, $3, $4, now())
@@ -213,7 +253,7 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
         [+a.anio, +a.max_mes, a.max_dia == null ? null : +a.max_dia, cargaId]);
     }
     await client.query('COMMIT');
-    res.json({ ok: true, carga: cargaId, anios: years, filas: clean.length, total });
+    res.json({ ok: true, carga: cargaId, anios: years, filas: clean.length, dias: cleanDias.length, total });
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -228,6 +268,7 @@ app.delete('/api/anios/:anio', wrap(auth), wrap(async (req, res) => {
   try {
     await client.query('BEGIN');
     const d = await client.query(`DELETE FROM ${SCHEMA}.ventas WHERE anio = $1`, [y]);
+    await client.query(`DELETE FROM ${SCHEMA}.ventas_dia WHERE anio = $1`, [y]);
     await client.query(`DELETE FROM ${SCHEMA}.anios WHERE anio = $1`, [y]);
     await client.query('COMMIT');
     res.json({ ok: true, filas: d.rowCount });

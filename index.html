@@ -17,6 +17,7 @@
     </div>
     <nav class="tabs" role="tablist">
       <button class="tab active" data-view="datos" role="tab">Datos</button>
+      <button class="tab" data-view="comparativa" role="tab">Comparativa</button>
       <button class="tab" data-view="anual" role="tab">Por año</button>
       <button class="tab" data-view="mensual" role="tab">Por mes</button>
       <button class="tab" data-view="semanal" role="tab">Por semana</button>
@@ -113,6 +114,51 @@
         </div>
       </div>
     </div>
+
+    <!-- ============ COMPARATIVA ============ -->
+    <section id="view-comparativa" class="view" data-analysis>
+      <h2 class="cmp-title">COMPARATIVAS <span id="cmpTitle">MES ACTUAL</span></h2>
+      <p class="server-status" id="cmpStatus" hidden></p>
+      <div class="empty-state" id="cmpEmpty" hidden>Todavía no hay detalle diario en la base. Vuelve a subir los archivos para habilitar la comparativa por mes, semana y día.</div>
+      <div class="cmp-layout" id="cmpContent">
+        <aside class="card slicers">
+          <div class="slicer">
+            <div class="slicer-head"><b>Años</b></div>
+            <div class="years-pick"><select id="cmpYearA"></select><span>vs</span><select id="cmpYearB"></select></div>
+          </div>
+          <div class="slicer">
+            <div class="slicer-head"><b>MES</b><button class="icon-btn" data-clear="months" title="Borrar filtro">✕</button></div>
+            <div class="chips" id="slMes"></div>
+          </div>
+          <div class="slicer" id="slSemWrap">
+            <div class="slicer-head"><b>Semanas</b><button class="icon-btn" data-clear="weeks" title="Borrar filtro">✕</button></div>
+            <div class="chips two" id="slSem"></div>
+          </div>
+          <div class="slicer" id="slDiaWrap">
+            <div class="slicer-head"><b>Día</b><button class="icon-btn" data-clear="days" title="Borrar filtro">✕</button></div>
+            <div class="chips days" id="slDia"></div>
+          </div>
+          <label class="multi"><input type="checkbox" id="cmpMulti"> Selección múltiple (o Ctrl + clic)</label>
+          <button class="btn" id="cmpToCut">Mes de corte hasta el día de corte</button>
+        </aside>
+        <div class="cmp-main">
+          <div class="filters card cmp-by">
+            <div class="f"><label>Ver por</label>
+              <select id="cmpBy"><option value="cadena">Cadena</option><option value="marca">Marca</option><option value="tipo">Paraíso vs Competencia</option></select>
+            </div>
+            <p class="period-note" id="cmpNote"></p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Soles</h2><div class="actions"><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div></div>
+            <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
+          </div>
+          <div class="card" id="cmpUndCard">
+            <div class="card-head"><h2>Unidades</h2><div class="actions"><button class="btn" data-copy="cmpUnd">Copiar tabla</button></div></div>
+            <div class="table-wrap"><table id="tblCmpUnd" class="tbl cmp"></table></div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- ============ POR AÑO ============ -->
     <section id="view-anual" class="view" data-analysis>

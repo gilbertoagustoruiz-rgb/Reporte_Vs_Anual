@@ -364,7 +364,11 @@
     f.error = null;
 
     const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
+    const dagg = new Map();
     const add = (cad, tie, mar, y, m, w, v, u, d = null, cob = null) => {
+      const dk = cad + '\u0001' + mar + '\u0001' + (cob == null ? '' : cob) + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0) + '\u0001' + (d || 0);
+      const dc = dagg.get(dk);
+      if (dc) { dc.v += v; dc.u += u; } else dagg.set(dk, { v, u });
       const key = cad + '\u0001' + tie + '\u0001' + mar + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0) + '\u0001' + (cob == null ? '' : cob);
       if (cob === 1) covTotal += v; else if (cob === 0) uncovTotal += v; else unkTotal += v;
       const cur = agg.get(key);
@@ -449,7 +453,7 @@
     const hasCob = f.parts.some((p) => p.mapping.cobertura != null);
     if (used && !hasCob) warnings.push('⚠ No encontré la columna de cobertura: estos datos no aparecerán cuando el reporte muestre "Solo coberturados". Elígela en la lista "Cobertura".');
     if (unknownLabels.size) warnings.push(`Valores de cobertura que no reconocí (cuentan como "sin dato"): ${[...unknownLabels].join(', ')}.`);
-    Object.assign(f, { agg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide, hasCob, covTotal, uncovTotal, unkTotal });
+    Object.assign(f, { agg, dagg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide, hasCob, covTotal, uncovTotal, unkTotal });
   }
 
   function monthsText(set) {
@@ -499,6 +503,7 @@
     st.innerHTML = '<span class="spinner"></span> Cargando los datos de la base… (si el servidor estaba en reposo puede tardar hasta un minuto)';
     try {
       serverData = await api('/api/data');
+      cmp.data = null;
       applyServerData(serverData);
       st.hidden = true;
     } catch (e) {
@@ -570,24 +575,27 @@
   // Archivos por guardar (aún no están en la base).
   function stagingPayload() {
     const ok = state.files.filter((f) => !f.error);
-    const agg = new Map();
+    const agg = new Map(), dagg = new Map();
     const maxY = {};
+    const merge = (dst, src) => { for (const [k, o] of src) { const c = dst.get(k); if (c) { c.v += o.v; c.u += o.u; } else dst.set(k, { v: o.v, u: o.u }); } };
     for (const f of ok) {
-      for (const [k, o] of f.agg) {
-        const cur = agg.get(k);
-        if (cur) { cur.v += o.v; cur.u += o.u; } else agg.set(k, { v: o.v, u: o.u });
-      }
+      merge(agg, f.agg); merge(dagg, f.dagg || new Map());
       for (const y in f.maxByYear) { const a = f.maxByYear[y]; if (!maxY[y] || a.stamp > maxY[y].stamp) maxY[y] = a; }
     }
-    const rows = [];
-    let total = 0;
+    const byYear = {};
+    const Y = (y) => byYear[y] || (byYear[y] = { rows: [], dias: [] });
+    let total = 0, nRows = 0;
     for (const [k, o] of agg) {
       const [c, t, m, y, mo, w, cob] = k.split('\u0001');
-      rows.push([c, t, m, +y, +mo, +w, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100, cob === '' ? null : +cob]);
-      total += o.v;
+      Y(y).rows.push([c, t, m, +y, +mo, +w, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100, cob === '' ? null : +cob]);
+      total += o.v; nRows++;
+    }
+    for (const [k, o] of dagg) {
+      const [c, m, cob, y, mo, w, d] = k.split('\u0001');
+      Y(y).dias.push([c, m, cob === '' ? null : +cob, +y, +mo, +w, +d, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100]);
     }
     const anios = Object.keys(maxY).map((y) => ({ anio: +y, max_mes: maxY[y].m, max_dia: maxY[y].d })).sort((a, b) => a.anio - b.anio);
-    return { archivos: ok.map((f) => f.name), anios, rows, total };
+    return { archivos: ok.map((f) => f.name), anios, byYear, total, rows: { length: nRows } };
   }
 
   function rebuildAll() {
@@ -611,10 +619,17 @@
     if (single.length && !confirm(`Atención: estos años solo traen un mes de datos: ${single.join(', ')}.\n\nSi los archivos deberían tener todo el año, cancela y revisa la hoja o la columna de fecha. ¿Guardar de todos modos?`)) return;
     if (rep.length && !confirm(`Los años ${rep.join(', ')} ya están en la base y se reemplazarán por completo con estos archivos. ¿Continuar?`)) return;
     const btn = $('#btnSave');
-    btn.disabled = true; btn.textContent = 'Guardando…';
+    btn.disabled = true;
     try {
-      const r = await api('/api/cargas', { method: 'POST', body: { archivos: P.archivos, anios: P.anios, rows: P.rows } });
-      toast(`Guardado: años ${r.anios.join(', ')} · ${num(r.filas)} registros.`);
+      let filas = 0;
+      // Un envío por año: cada año se reemplaza por completo y la carga no se vuelve demasiado pesada.
+      for (const a of P.anios) {
+        btn.textContent = `Guardando ${a.anio}…`;
+        const Y = P.byYear[a.anio] || { rows: [], dias: [] };
+        const r = await api('/api/cargas', { method: 'POST', body: { archivos: P.archivos, anios: [a], rows: Y.rows, dias: Y.dias } });
+        filas += r.filas;
+      }
+      toast(`Guardado: años ${P.anios.map((a) => a.anio).join(', ')} · ${num(filas)} registros.`);
       state.files = [];
       rebuildAll();
       await loadServer();
@@ -1043,6 +1058,7 @@
     $('#chainMeasure').textContent = '· ' + MEASURES[F.measure] + (F.measure === 'ytd' ? ` (${F.C.ytdLabel(F.C.y)})` : F.measure === 'month' ? ` (${F.C.monthLabel})` : F.measure === 'week' ? ` (semana ${F.C.w})` : '');
     renderTable('tblChains', entityAOA(F, R, 'chains'), 'chains');
     renderStores();
+    renderCmp();
   }
 
   function renderStores() {
@@ -1163,10 +1179,104 @@
     });
   }
 
+  // ---------------------------------------------------------------- comparativa (segmentadores Mes / Semana / Día)
+  const cmp = { data: null, loading: null, months: null, weeks: new Set(), days: new Set(), init: false };
+
+  async function loadCmp() {
+    if (cmp.data) return cmp.data;
+    if (!cmp.loading) {
+      cmp.loading = api('/api/dias').then((D) => {
+        cmp.data = D.rows.map(([ci, mi, cob, y, m, w, d, v, u]) => ({ cadena: D.dict.cadenas[ci], marca: D.dict.marcas[mi], tipo: tipoDe(D.dict.marcas[mi]), cob: cob ?? null, y, m, w, d, v, u }));
+        return cmp.data;
+      }).finally(() => { cmp.loading = null; });
+    }
+    return cmp.loading;
+  }
+
+  async function renderCmp() {
+    if (state.view !== 'comparativa' || !lastF) return;
+    $('#cmpStatus').hidden = false;
+    $('#cmpStatus').textContent = 'Cargando el detalle diario…';
+    let data;
+    try { data = await loadCmp(); } catch (e) { $('#cmpStatus').textContent = e.message; return; }
+    $('#cmpStatus').hidden = true;
+    const F = lastF, C = F.C;
+    $('#cmpEmpty').hidden = !!data.length;
+    $('#cmpContent').hidden = !data.length;
+    if (!data.length) return;
+
+    // Años a comparar (por defecto el año del corte contra el anterior).
+    const years = [...new Set(data.map((r) => r.y))].sort((a, b) => a - b);
+    const selB = $('#cmpYearB'), selA = $('#cmpYearA');
+    if (!cmp.init) {
+      selB.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selB.value = years.includes(C.y) ? C.y : years[years.length - 1];
+      selA.innerHTML = years.map((y) => `<option>${y}</option>`).join(''); selA.value = years.includes(+selB.value - 1) ? +selB.value - 1 : years[0];
+      // Por defecto: el mes de corte, hasta el día de corte (comparación pareja con el año anterior).
+      cmp.months = new Set([C.m]);
+      cmp.days = new Set(C.d ? Array.from({ length: C.d }, (_, i) => i + 1) : []);
+      cmp.init = true;
+    }
+    const yB = +selB.value, yA = +selA.value;
+
+    // Filtros generales (cobertura, tipo de venta, cadena, marca).
+    const cobOk = (r) => F.cob === 'all' || !state.hasCob || (F.cob === 'si' ? r.cob === 1 : F.cob === 'no' ? r.cob === 0 : r.cob == null);
+    const base = data.filter((r) => (r.y === yA || r.y === yB) && cobOk(r) && (!F.tipo || r.tipo === F.tipo) && (!F.chain || r.cadena === F.chain) && (!F.brand || r.marca === F.brand));
+
+    // Segmentadores: opciones disponibles en cascada (Mes → Semana → Día), como en Excel.
+    const monthsAvail = new Set(base.map((r) => r.m));
+    const inM = (r) => !cmp.months.size || cmp.months.has(r.m);
+    const weeksAvail = new Set(base.filter((r) => inM(r) && r.w > 0).map((r) => r.w));
+    const inW = (r) => !cmp.weeks.size || cmp.weeks.has(r.w);
+    const daysAvail = new Set(base.filter((r) => inM(r) && inW(r) && r.d > 0).map((r) => r.d));
+    const chips = (el, values, sel, label, avail) => {
+      el.innerHTML = values.map((v) => `<button class="chip ${sel.has(v) ? 'on' : ''} ${avail.has(v) ? '' : 'off'}" data-v="${v}">${label(v)}</button>`).join('');
+    };
+    chips($('#slMes'), Array.from({ length: 12 }, (_, i) => i + 1).filter((m) => monthsAvail.has(m) || cmp.months.has(m)), cmp.months, (m) => MESES_LARGO[m - 1], monthsAvail);
+    chips($('#slSem'), [...weeksAvail, ...cmp.weeks].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b), cmp.weeks, (w) => `Sem-${w}`, weeksAvail);
+    chips($('#slDia'), Array.from({ length: 31 }, (_, i) => i + 1), cmp.days, (d) => d, daysAvail);
+    const noDay = !base.some((r) => r.d > 0);
+    $('#slDiaWrap').hidden = noDay; $('#slSemWrap').hidden = !base.some((r) => r.w > 0);
+
+    const inD = (r) => !cmp.days.size || cmp.days.has(r.d);
+    const sel = base.filter((r) => inM(r) && inW(r) && inD(r));
+    const by = $('#cmpBy').value;
+    const keyOf = (r) => (by === 'marca' ? r.marca || '(Sin marca)' : by === 'tipo' ? TIPO_LABEL[r.tipo] : r.cadena);
+    const groups = new Map();
+    for (const r of sel) {
+      const k = keyOf(r);
+      const g = groups.get(k) || { k, vA: 0, vB: 0, uA: 0, uB: 0 };
+      if (r.y === yA) { g.vA += r.v; g.uA += r.u; } else { g.vB += r.v; g.uB += r.u; }
+      groups.set(k, g);
+    }
+    const list = [...groups.values()].sort((a, b) => a.k.localeCompare(b.k, 'es'));
+    cmp.last = { yA, yB, list, by };
+    const hasUnits = sel.some((r) => r.u);
+    renderTable('tblCmpSoles', cmpAOA('v'));
+    $('#cmpUndCard').hidden = !hasUnits;
+    if (hasUnits) renderTable('tblCmpUnd', cmpAOA('u'));
+
+    const ms = [...cmp.months].sort((a, b) => a - b).map((m) => MESES_LARGO[m - 1]);
+    $('#cmpTitle').textContent = cmp.months.size === 1 && [...cmp.months][0] === C.m && yB === C.y ? 'MES ACTUAL' : (ms.join(' + ') || 'TODO EL AÑO').toUpperCase();
+    const dsel = [...cmp.days].sort((a, b) => a - b);
+    const dTxt = !dsel.length ? 'todos los días' : dsel.length > 2 && dsel[dsel.length - 1] - dsel[0] + 1 === dsel.length ? `días ${dsel[0]} al ${dsel[dsel.length - 1]}` : `días ${dsel.join(', ')}`;
+    $('#cmpNote').innerHTML = `Comparando <b>${yB}</b> contra <b>${yA}</b> · ${ms.length ? ms.join(', ') : 'todos los meses'} · ${cmp.weeks.size ? 'semanas ' + [...cmp.weeks].sort((a, b) => a - b).join(', ') : 'todas las semanas'} · ${dTxt}${noDay ? ' · <span class="down">los archivos no traen fecha diaria</span>' : ''}`;
+  }
+
+  function cmpAOA(field) {
+    const { yA, yB, list, by } = cmp.last;
+    const unit = field === 'v' ? 'Soles' : 'Und';
+    const A = field === 'v' ? 'vA' : 'uA', B = field === 'v' ? 'vB' : 'uB';
+    const head = [by === 'marca' ? 'Marca' : by === 'tipo' ? 'Tipo de venta' : 'Cadena', `${yA} ${unit}`, `${yB} ${unit}`, 'Var S/'.replace('S/', field === 'v' ? 'S/' : 'Und'), 'Var %'];
+    const t = field === 'v' ? '$' : 'n';
+    const rows = list.filter((g) => g[A] || g[B]).map((g) => [g.k, g[A], g[B], g[B] - g[A], varPct(g[B], g[A])]);
+    const sa = rows.reduce((s, r) => s + r[1], 0), sb = rows.reduce((s, r) => s + r[2], 0);
+    return { head, rows, foot: [['Total general', sa, sb, sb - sa, varPct(sb, sa)]], types: ['t', t, t, t, '%'], varCols: [3, 4] };
+  }
+
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
     const F = lastF, R = lastR;
-    return { groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
+    return { cmpSoles: () => cmpAOA('v'), cmpUnd: () => cmpAOA('u'), groups: () => groupsAOA(F, R), years: () => yearsAOA(F, R), months: () => monthsAOA(F, R), weeks: () => weeksAOA(F, R), chains: () => entityAOA(F, R, 'chains'), stores: () => entityAOA(F, R, 'stores') }[id]();
   }
   async function copyTable(id) {
     const T = aoaFor(id);
@@ -1199,6 +1309,10 @@
     const corte = `Corte: ${C.y} · ${C.monthLabel}${C.hasW ? ' · Semana ' + C.w : ''} (último dato ${C.dateText})`;
     const filt = `${corte}${F.cob && F.cob !== 'all' ? ' · ' + COB_LABEL[F.cob] : ''}${F.tipo ? ' · ' + TIPO_LABEL[F.tipo] : ''}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
     const wb = XLSX.utils.book_new();
+    if (cmp.last && cmp.last.list.length) {
+      XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('v'), 'Comparativa (soles) · ' + $('#cmpNote').textContent), 'Comparativa soles');
+      if (cmp.last.list.some((g) => g.uA || g.uB)) XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('u'), 'Comparativa (unidades) · ' + $('#cmpNote').textContent), 'Comparativa und');
+    }
     XLSX.utils.book_append_sheet(wb, sheetFrom(yearsAOA(F, R), 'Evaluación por año · ' + filt), 'Por año');
     if (F.showShare) XLSX.utils.book_append_sheet(wb, sheetFrom(groupsAOA(F, R), 'Venta Paraíso vs Competencia · ' + filt), 'Paraíso vs Competencia');
     XLSX.utils.book_append_sheet(wb, sheetFrom(monthsAOA(F, R), 'Meses × años · ' + filt), 'Por mes');
@@ -1216,6 +1330,7 @@
     $('#analysis').hidden = v === 'datos';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
     $('#fMeasureWrap').hidden = !(v === 'cadena' || v === 'tienda');
+    if (v === 'comparativa') renderCmp();
     Object.values(state.charts).forEach((c) => c.resize());
     window.scrollTo({ top: 0 });
   }
@@ -1296,6 +1411,24 @@
     }
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
+    const toggle = (set, v) => (set.has(v) ? set.delete(v) : set.add(v));
+    for (const [id, key] of [['#slMes', 'months'], ['#slSem', 'weeks'], ['#slDia', 'days']]) {
+      $(id).addEventListener('click', (e) => {
+        const b = e.target.closest('.chip'); if (!b) return;
+        const v = +b.dataset.v;
+        // Clic normal: selecciona solo ese valor; Ctrl/Cmd + clic: suma o quita (como los segmentadores de Excel).
+        if (e.ctrlKey || e.metaKey || $('#cmpMulti').checked) toggle(cmp[key], v);
+        else if (cmp[key].size === 1 && cmp[key].has(v)) cmp[key].clear();
+        else { cmp[key].clear(); cmp[key].add(v); }
+        renderCmp();
+      });
+    }
+    $$('[data-clear]').forEach((b) => b.addEventListener('click', () => { cmp[b.dataset.clear].clear(); renderCmp(); }));
+    $('#cmpToCut').addEventListener('click', () => {
+      const C = lastF.C; cmp.months = new Set([C.m]); cmp.weeks.clear();
+      cmp.days = new Set(C.d ? Array.from({ length: C.d }, (_, i) => i + 1) : []); renderCmp();
+    });
+    ['#cmpYearA', '#cmpYearB', '#cmpBy'].forEach((s) => $(s).addEventListener('change', renderCmp));
     renderFiles();
     renderSession();
     loadServer();

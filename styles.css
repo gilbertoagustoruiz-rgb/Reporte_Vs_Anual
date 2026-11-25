@@ -223,3 +223,30 @@ select, input[type="number"], input[type="search"] {
 .form-error { color: var(--bad); font-size: 13px; min-height: 1em; margin: 4px 0; }
 .user-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; align-items: end; }
 .user-form .btn, .user-form .form-error { grid-column: 1 / -1; justify-self: start; }
+
+/* ---------- Comparativa (segmentadores tipo Excel) ---------- */
+.cmp-title { text-align: center; color: #d61f26; font-size: 26px; font-weight: 800; text-decoration: underline; letter-spacing: .3px; margin: 4px 0 18px; }
+.cmp-layout { display: grid; grid-template-columns: 290px 1fr; gap: 18px; align-items: start; }
+.slicers { position: sticky; top: 80px; }
+.slicer { margin-bottom: 16px; }
+.slicer-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+.icon-btn { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 13px; }
+.icon-btn:hover { color: var(--bad); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips.two .chip { flex: 0 0 calc(50% - 3px); }
+.chips.days { display: grid; grid-template-columns: repeat(5, 1fr); }
+.chip { border: 1px solid #c7cfdb; background: #fff; color: var(--text); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12.5px; cursor: pointer; text-align: center; }
+.chip.on { background: #44546a; border-color: #44546a; color: #fff; font-weight: 600; }
+.chip.off:not(.on) { color: #b5bcc8; border-style: dashed; }
+.years-pick { display: flex; align-items: center; gap: 6px; }
+.years-pick select { flex: 1; }
+.multi { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); margin: 4px 0 10px; }
+.cmp-by { align-items: center; }
+.cmp-by .period-note { margin: 0; flex: 1; }
+.tbl.cmp thead th { background: #44546a; color: #fff; }
+.tbl.cmp tfoot td { background: #44546a; color: #fff; }
+.tbl.cmp tfoot td.up { color: #b9f5cf; } .tbl.cmp tfoot td.down { color: #ffc2c2; }
+@media (max-width: 900px) { .cmp-layout { grid-template-columns: 1fr; } .slicers { position: static; } }
+.tab { white-space: nowrap; padding: 8px 11px; }
+.userbox .who { white-space: nowrap; }
+@media (max-width: 1500px) { .brand .sub { display: none; } .topbar { gap: 14px; } .userbox .btn { padding: 6px 9px; font-size: 12.5px; } }
