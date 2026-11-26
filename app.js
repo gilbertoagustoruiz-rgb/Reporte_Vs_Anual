@@ -566,6 +566,27 @@
     const D = serverData;
     if (!D) return;
     const logged = !!session.user;
+    const monthsOf = new Map();
+    for (const r of state.records) if (r.v) (monthsOf.get(r.y) || monthsOf.set(r.y, new Set()).get(r.y)).add(r.m);
+    $('#baseYears').innerHTML = D.anios.length ? [...D.anios].reverse().map((a) => {
+      const ms = monthsOf.get(a.anio) || new Set();
+      const lastDay = new Date(Date.UTC(a.anio, a.max_mes, 0)).getUTCDate();
+      const strip = MESES.map((m, i) => {
+        const on = ms.has(i + 1), part = on && i + 1 === a.max_mes && a.max_dia && a.max_dia < lastDay;
+        return `<span class="${part ? 'part' : on ? 'on' : ''}" title="${MESES_LARGO[i]}${on ? (part ? `: hasta el día ${a.max_dia}` : ': cargado') : ': sin datos'}">${m[0]}</span>`;
+      }).join('');
+      const tags = [
+        ms.size === 12 ? '<span class="yc-tag">12 meses</span>' : `<span class="yc-tag ${ms.size <= 1 ? 'warn' : ''}">${ms.size} ${ms.size === 1 ? 'mes' : 'meses'}</span>`,
+        a.con_cobertura ? `<span class="yc-tag">${a.total ? fmtPct.format(a.cubierto / a.total) : '—'} coberturado</span>` : '<span class="yc-tag warn">Sin cobertura</span>',
+      ].join('');
+      return `<article class="yc">
+        <div class="yc-top"><span class="yc-year">${a.anio}</span><span class="yc-total">${moneyShort(a.total)}</span></div>
+        <div class="yc-months" aria-label="Meses cargados de ${a.anio}">${strip}</div>
+        <div class="yc-tags">${tags}</div>
+        <div class="yc-meta">Último dato: <b>${a.max_dia ? `${a.max_dia} de ${MESES_LARGO[a.max_mes - 1].toLowerCase()}` : MESES_LARGO[a.max_mes - 1]}</b><br>Subido por <b>${esc(a.usuario || '—')}</b> · ${new Date(a.actualizado).toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}</div>
+        ${logged ? `<button class="btn btn-danger yc-del" data-del-year="${a.anio}">Eliminar ${a.anio}</button>` : ''}
+      </article>`;
+    }).join('') : '<p class="muted">La base todavía está vacía. Inicia sesión y sube tus archivos.</p>';
     const rows = D.anios.map((a) => `<tr>
       <td><b>${a.anio}</b></td>
       <td>${a.max_dia ? `${String(a.max_dia).padStart(2, '0')}/${String(a.max_mes).padStart(2, '0')}/${a.anio}` : `${MESES_LARGO[a.max_mes - 1]} ${a.anio}`}</td>
@@ -967,6 +988,7 @@
     renderBanner(F);
     renderResumen(F, R);
     renderKpis(F, R);
+    renderAnual(F, R);
     renderYearCharts(F, R);
     renderTable('tblYears', yearsAOA(F, R));
     $('#groupsCard').hidden = !F.showShare;
@@ -1041,6 +1063,8 @@
   const moneyTick = (v) => (Math.abs(v) >= 1e6 ? 'S/ ' + (v / 1e6).toFixed(1) + ' M' : Math.abs(v) >= 1e3 ? 'S/ ' + Math.round(v / 1e3) + ' K' : 'S/ ' + v);
 
   function upsertChart(key, canvasId, config) {
+    // Si el gráfico está en una pestaña oculta, se dibuja sin animación para que aparezca listo al mostrarla.
+    if (!$('#' + canvasId).offsetParent) config.options = { ...config.options, animation: false };
     const ch = state.charts[key];
     if (ch) { ch.config.type = config.type; ch.data = config.data; ch.options = config.options; ch.update(); }
     else state.charts[key] = new Chart($('#' + canvasId), config);
@@ -1085,6 +1109,42 @@
         scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
       },
     });
+  }
+
+  // ---------------------------------------------------------------- por año: titular y línea de tiempo
+  function renderAnual(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const ys = F.years;
+    const ytd = (y) => R.byYear.get(y)?.ytd || 0;
+    const best = ys.reduce((b, y) => (ytd(y) > ytd(b) ? y : b), ys[0]);
+    const p = ys.includes(P) ? varPct(ytd(Y), ytd(P)) : null;
+    $('#anualCut').textContent = C.d ? `${C.d} de ${C.monthLabel.toLowerCase()}` : C.monthLabel.toLowerCase();
+    const delta = p == null ? '' : ` <span class="delta ${p >= 0 ? 'up' : 'down'}">${(p > 0 ? '+' : '') + (p * 100).toFixed(1)}%</span> <span class="vs">frente a ${P}</span>`;
+    $('#anualHeadline').innerHTML = best === Y
+      ? `${Y} es el mejor año al corte: <span class="amount">${moneyShort(ytd(Y))}</span>,${delta}`
+      : `${Y} va <span class="amount">${moneyShort(ytd(Y))}</span> al corte,${delta}`;
+    const first = ys[0];
+    const pt = first !== Y ? varPct(ytd(Y), ytd(first)) : null;
+    $('#anualSub').textContent = [
+      best !== Y ? `El mejor año al corte sigue siendo ${best} (${moneyShort(ytd(best))}).` : null,
+      pt != null ? `Desde ${first}, la venta al mismo corte ${pt >= 0 ? 'creció' : 'cayó'} ${pct(Math.abs(pt)).replace('+', '')} en ${ys.length - 1} ${ys.length - 1 === 1 ? 'año' : 'años'}.` : null,
+    ].filter(Boolean).join(' ');
+    const max = Math.max(1, ...ys.map(ytd));
+    const showShare = state.hasBrand && !F.tipo && !F.brand;
+    $('#anualTimeline').innerHTML = ys.map((y) => {
+      const Yo = R.byYear.get(y), Po = R.byYear.get(y - 1);
+      const d = Po ? varPct(Yo.ytd, Po.ytd) : null;
+      const sh = Yo.p.ytd + Yo.c.ytd > 0 ? Yo.p.ytd / (Yo.p.ytd + Yo.c.ytd) : null;
+      const badge = y === Y ? '<span class="tl-badge now">Año en curso</span>' : y === best ? '<span class="tl-badge best">Mejor año al corte</span>' : '<span class="tl-badge ghost" aria-hidden="true">&nbsp;</span>';
+      return `<li class="tl ${y === Y ? 'now' : ''}" style="--tc:${yearColor(y)}">
+        <span class="tl-year">${y}</span>${badge}
+        <div class="tl-row"><span>Al corte</span><b>${moneyShort(Yo.ytd)}</b></div>
+        <div class="tl-row"><span>vs año anterior</span><span class="tl-delta ${dirCls(d)}">${d == null ? '—' : pct(d)}</span></div>
+        <div class="tl-row"><span>${y === Y ? 'En lo que va del año' : 'Año completo'}</span><b>${moneyShort(Yo.full)}</b></div>
+        ${showShare && sh != null ? `<div class="tl-row"><span>Part. Paraíso</span><b>${fmtPct.format(sh)}</b></div>` : ''}
+        <div class="tl-bar" aria-hidden="true"><i style="width:${(Yo.ytd / max) * 100}%"></i></div>
+      </li>`;
+    }).join('');
   }
 
   // ---------------------------------------------------------------- resumen (dashboard inicial)
@@ -1474,11 +1534,27 @@
       if (hasUnits) renderWeekChart('chartCmpWeekUnd', 'cwu', weeks, chartYears, sumBy('u'), yA, yB, num);
     }
 
+    applyUnitPanes(hasUnits, weeks.length > 0);
     const ms = [...cmp.months].sort((a, b) => a - b).map((m) => MESES_LARGO[m - 1]);
     $('#cmpTitle').textContent = cmp.months.size === 1 && [...cmp.months][0] === C.m && yB === C.y ? 'mes actual' : (ms.length ? ms.join(' y ').toLowerCase() : 'año completo');
     const dsel = [...cmp.days].sort((a, b) => a - b);
     const dTxt = !dsel.length ? 'todos los días' : dsel.length > 2 && dsel[dsel.length - 1] - dsel[0] + 1 === dsel.length ? `días ${dsel[0]} al ${dsel[dsel.length - 1]}` : `días ${dsel.join(', ')}`;
     $('#cmpNote').innerHTML = `Comparando <b>${yB}</b> contra <b>${yA}</b> · ${ms.length ? ms.join(', ') : 'todos los meses'} · ${cmp.weeks.size ? 'semanas ' + [...cmp.weeks].sort((a, b) => a - b).join(', ') : 'todas las semanas'} · ${dTxt}${noDay ? ' · <span class="down">los archivos no traen fecha diaria</span>' : ''}`;
+  }
+
+  const unitSel = { detail: 'v', weeks: 'v' };
+  function applyUnitPanes(hasUnits, hasWeeks) {
+    for (const seg of $$('.seg[data-seg]')) {
+      const k = seg.dataset.seg;
+      if (!hasUnits) unitSel[k] = 'v';
+      seg.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.unit === unitSel[k]); b.disabled = b.dataset.unit === 'u' && !hasUnits; b.setAttribute('aria-selected', String(b.dataset.unit === unitSel[k])); });
+    }
+    $('#cmpSolesCard').hidden = unitSel.detail !== 'v';
+    $('#cmpUndCard').hidden = unitSel.detail !== 'u';
+    $('#cmpNoWeeks').hidden = hasWeeks;
+    $('#cmpWeekCard').hidden = !hasWeeks || unitSel.weeks !== 'v';
+    $('#cmpWeekUndCard').hidden = !hasWeeks || unitSel.weeks !== 'u';
+    $$('.seg[data-seg="weeks"]').forEach((s) => (s.hidden = !hasWeeks));
   }
 
   function weekAOA(field) {
@@ -1789,10 +1865,10 @@
       ctx.save();
       ctx.font = '700 11px "Plus Jakarta Sans", system-ui, sans-serif'; ctx.textBaseline = 'middle';
       chart.getDatasetMeta(0).data.forEach((bar, i) => {
-        const p = o.items[i].p;
-        ctx.fillStyle = p >= 0 ? '#0E8F6B' : '#D42E43';
-        ctx.textAlign = p >= 0 ? 'left' : 'right';
-        ctx.fillText(pct(p), bar.x + (p >= 0 ? 6 : -6), bar.y);
+        const p = o.items[i].p, txt = pct(p);
+        const inside = Math.abs(bar.x - bar.base) > ctx.measureText(txt).width + 16;
+        if (inside) { ctx.fillStyle = '#fff'; ctx.textAlign = p >= 0 ? 'right' : 'left'; ctx.fillText(txt, bar.x + (p >= 0 ? -8 : 8), bar.y); }
+        else { ctx.fillStyle = p >= 0 ? '#0E8F6B' : '#D42E43'; ctx.textAlign = p >= 0 ? 'left' : 'right'; ctx.fillText(txt, bar.x + (p >= 0 ? 6 : -6), bar.y); }
       });
       ctx.restore();
     },
@@ -1860,7 +1936,7 @@
     $('#analysis').hidden = v === 'datos';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
     if (v === 'comparativa') renderCmp();
-    Object.values(state.charts).forEach((c) => c.resize());
+    requestAnimationFrame(() => requestAnimationFrame(() => Object.values(state.charts).forEach((c) => c.resize())));
     window.scrollTo({ top: 0 });
   }
 
@@ -1868,7 +1944,7 @@
     if (window.Chart) { Chart.defaults.font.family = '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif'; Chart.defaults.color = '#4A5072'; }
     if (!window.XLSX) { document.body.innerHTML = '<p style="padding:40px">No se pudo cargar el lector de Excel. Revisa tu conexión y recarga la página.</p>'; return; }
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-    $('#btnGoCompare').addEventListener('click', () => setView('anual'));
+    $('#btnGoCompare').addEventListener('click', () => setView('resumen'));
     $('#fileInput').addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); });
     $('#btnSave').addEventListener('click', saveToBase);
     $('#formRepl').addEventListener('submit', async (e) => {
@@ -1887,7 +1963,7 @@
       catch (x) { toast(x.message); }
     });
     $('#btnReload').addEventListener('click', loadServer);
-    $('#tblBase').addEventListener('click', (e) => { const b = e.target.closest('[data-del-year]'); if (b) deleteYear(+b.dataset.delYear); });
+    for (const id of ['#tblBase', '#baseYears']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-del-year]'); if (b) deleteYear(+b.dataset.delYear); });
 
     // Sesión y usuarios
     document.addEventListener('click', (e) => {
@@ -1979,6 +2055,11 @@
       });
     }
     $$('[data-clear]').forEach((b) => b.addEventListener('click', () => { cmp[b.dataset.clear].clear(); renderCmp(); }));
+    $$('.seg[data-seg]').forEach((seg) => seg.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-unit]'); if (!b || b.disabled) return;
+      unitSel[seg.dataset.seg] = b.dataset.unit;
+      renderCmp().then(() => Object.values(state.charts).forEach((c) => c.resize()));
+    }));
     $('#cmpToCut').addEventListener('click', () => {
       const C = lastF.C; cmp.months = new Set([C.m]); cmp.weeks.clear();
       cmp.days = new Set(C.d ? Array.from({ length: C.d }, (_, i) => i + 1) : []); renderCmp();

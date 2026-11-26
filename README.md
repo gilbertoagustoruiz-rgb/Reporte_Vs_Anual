@@ -38,7 +38,7 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
   - **Tiendas que más crecen** y **que más caen**, lado a lado.
   - **Paraíso frente a la competencia** (dona) y **últimas semanas** (Var % de las últimas 8 semanas).
 
-- **Comparativa**: igual que la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Debajo, **por semana**: tablas de Soles y Unidades con columnas Sem-N × año, más su Var % y el total, y un gráfico de barras por semana para los últimos tres años, con la Var % del año actual frente al anterior sobre cada semana. Usa el detalle diario guardado en la tabla `ventas_dia`.
+- **Comparativa**: organizada como una historia. Arriba va la **barra de período** (Años, Mes, Semanas y Día, siempre visible al bajar) y un índice para saltar entre secciones: *Lo más importante*, *De dónde viene la diferencia*, *Detalle* y *Semana a semana*. Soles y Unidades se eligen con un selector. Funciona como la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Debajo, **por semana**: tablas de Soles y Unidades con columnas Sem-N × año, más su Var % y el total, y un gráfico de barras por semana para los últimos tres años, con la Var % del año actual frente al anterior sobre cada semana. Usa el detalle diario guardado en la tabla `ventas_dia`.
 
 - **Por año**: indicadores del año en curso frente al anterior (acumulado, mes de corte y semana de corte), gráficos por año y una tabla con todos los años, cada uno con su variación contra el año anterior.
 - Filtros: **desde el año**, **cadena** y **marca**.
@@ -72,6 +72,9 @@ Los archivos traen una columna de cobertura, por ejemplo **COBERTURA** o **COBER
 - **El reporte muestra por defecto solo Coberturados.** El filtro "Cobertura" permite ver también No coberturados, Sin dato o Todos.
 - **Al subir**, cada archivo muestra cuánto de su venta es coberturada. Si un archivo no trae la columna, la app avisa, porque esos datos no aparecerán en "Solo coberturados".
 - **En Datos**, la tabla de la base muestra la venta coberturada de cada año.
+
+- **Por año**: un titular con la historia de todos los años (mejor año al corte y evolución desde el primer año) y una **línea de tiempo** con una tarjeta por año. Debajo van los gráficos, Paraíso vs Competencia y la tabla completa.
+- **Datos**: una **tarjeta por año** con una tira de 12 meses que muestra qué meses están cargados (el mes incompleto aparece a medias), el % coberturado y quién lo subió. La tabla técnica de la base queda plegada.
 
 ## Venta Paraíso vs Competencia
 

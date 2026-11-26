@@ -519,3 +519,92 @@ h1, h2, h3, h4, .k-value, .hero-line, .ins-value, .hk-value { font-family: "Sora
 .share-list .sh { font-weight: 700; }
 .heat { grid-template-columns: 16px; }
 .heat .hw { width: 16px; height: 15px; font-size: 10.5px; line-height: 15px; color: var(--muted); font-weight: 700; text-align: center; }
+
+/* =====================================================================
+   Organización por historias: barra de período, índice y secciones
+   ===================================================================== */
+.period {
+  position: sticky; top: 64px; z-index: 20;
+  background: rgba(255, 255, 255, .92); backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 12px 18px; margin: 0 0 14px; display: grid; gap: 8px;
+}
+.period-row { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.period-label { font: 700 12.5px "Sora", sans-serif; color: var(--text-2); }
+.period .chips { flex-wrap: wrap; gap: 5px; }
+.period .chip { padding: 4px 11px; font-size: 12.5px; }
+.period .chips.days { display: flex; }
+.period .chips.days .chip { width: 30px; height: 28px; padding: 0; display: grid; place-items: center; }
+.period .years-pick { justify-content: flex-start; }
+.period .years-pick select { flex: 0 0 auto; min-width: 96px; }
+.period-tools { display: flex; align-items: center; gap: 12px; }
+.period-tools .multi { margin: 0; }
+.period .icon-btn { color: var(--sky); }
+
+.subnav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px; }
+.subnav a { text-decoration: none; color: var(--text-2); font-weight: 600; font-size: 13px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: #fff; }
+.subnav a:hover { color: var(--night); border-color: var(--night); }
+
+.story { margin: 0 0 26px; scroll-margin-top: 230px; }
+.story-title { font: 700 20px "Sora", sans-serif; letter-spacing: -.01em; margin: 0 0 12px; color: var(--text); }
+.story-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.story-head .story-title { margin: 0; }
+.seg { display: inline-flex; background: #E9ECF5; border-radius: 999px; padding: 3px; }
+.seg button { border: 0; background: transparent; padding: 7px 16px; border-radius: 999px; font: 600 13px "Plus Jakarta Sans", sans-serif; color: var(--text-2); cursor: pointer; }
+.seg button.on { background: #fff; color: var(--night); box-shadow: 0 1px 4px rgba(27, 31, 75, .15); }
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---------- Por año: hero con indicadores claros y línea de tiempo ---------- */
+#view-anual .hero { display: grid; gap: 20px; }
+.hero .hero-kpis-light { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: #ffffff1f; border-radius: 14px; overflow: hidden; margin: 0; }
+.hero .hero-kpis-light .kpi { background: var(--night-2); border: 0; border-radius: 0; box-shadow: none; color: #fff; }
+.hero .hero-kpis-light .k-label { color: #C9CCF2; }
+.hero .hero-kpis-light .k-sub { color: #C9CCF2; }
+.hero .hero-kpis-light .k-sub .up { color: #5BE3B9; } .hero .hero-kpis-light .k-sub .down { color: #FF8C9A; }
+
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 14px; overflow-x: auto; position: relative; }
+.tl { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 16px 14px; box-shadow: var(--shadow); position: relative; display: flex; flex-direction: column; gap: 6px; }
+.tl::before { content: ""; position: absolute; left: 16px; right: 16px; top: 0; height: 4px; border-radius: 0 0 4px 4px; background: var(--tc, #CBD5E1); }
+.tl.now { border-color: var(--sky); box-shadow: 0 10px 30px -18px rgba(61, 107, 255, .8); }
+.tl-year { font: 800 26px "Sora", sans-serif; letter-spacing: -.02em; }
+.tl-badge { align-self: flex-start; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: #EEF0F6; color: var(--text-2); }
+.tl-badge.best { background: #FFF1E6; color: #B4530B; }
+.tl-badge.now { background: #E8EEFF; color: #2A55E0; }
+.tl-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-2); }
+.tl-row b { font: 700 14px "Sora", sans-serif; color: var(--text); }
+.tl-delta { font: 700 13px "Sora", sans-serif; }
+.tl-bar { height: 8px; border-radius: 999px; background: #EEF0F6; overflow: hidden; margin-top: 4px; }
+.tl-bar i { display: block; height: 100%; border-radius: 999px; background: var(--tc); }
+
+/* ---------- Datos: tarjetas por año con tira de 12 meses ---------- */
+.data-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.data-head h2 { font: 700 26px "Sora", sans-serif; letter-spacing: -.02em; }
+.data-head p { margin: 4px 0 0; }
+.year-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.yc { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.yc-top { display: flex; justify-content: space-between; align-items: baseline; }
+.yc-year { font: 800 24px "Sora", sans-serif; letter-spacing: -.02em; }
+.yc-total { font: 700 15px "Sora", sans-serif; color: var(--text-2); }
+.yc-months { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+.yc-months span { height: 22px; border-radius: 5px; background: #EEF0F6; color: #A3A9C4; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+.yc-months span.on { background: var(--sky); color: #fff; }
+.yc-months span.part { background: linear-gradient(90deg, var(--sky) 55%, #BFD0FF 55%); color: #fff; }
+.yc-meta { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.yc-meta b { color: var(--text-2); }
+.yc-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.yc-tag { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: var(--good-bg); color: var(--good); }
+.yc-tag.warn { background: var(--warn-bg); color: var(--warn); }
+.yc-del { align-self: flex-start; }
+#baseCard { margin-bottom: 18px; }
+#baseCard .history:first-child { margin-top: 0; }
+.dropzone { border-radius: 18px; border-color: #C6CEE8; background: #fff; }
+.dropzone.over { background: #EEF3FF; border-color: var(--sky); }
+.dz-icon { width: 54px; height: 54px; border-radius: 16px; margin: 0 auto; display: grid; place-items: center; background: #EEF3FF; color: var(--sky); }
+.dz-title { font-family: "Sora", sans-serif; }
+
+@media (max-width: 900px) {
+  .period { position: static; }
+  .period-row { grid-template-columns: 1fr; gap: 6px; }
+}
+.tl-badge.ghost { visibility: hidden; }
+.tbl tfoot td.dbar::before { display: none; }

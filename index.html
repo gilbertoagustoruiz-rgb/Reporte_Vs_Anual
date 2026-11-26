@@ -32,13 +32,17 @@
     <section id="view-datos" class="view active">
       <div id="serverStatus" class="server-status" hidden></div>
 
-      <div id="baseCard" class="card">
-        <div class="card-head">
-          <h2>Datos guardados en la base</h2>
-          <div class="actions"><button class="btn" id="btnReload">Actualizar</button><button class="btn btn-primary" id="btnGoCompare">Ver evaluación →</button></div>
+      <header class="data-head">
+        <div>
+          <h2>Datos del reporte</h2>
+          <p class="muted">Lo que está guardado aquí es lo que ven todas las personas que abren el reporte.</p>
         </div>
-        <p class="muted small">Esto es lo que ven todas las personas que abren el reporte.</p>
-        <div class="table-wrap"><table id="tblBase" class="tbl"></table></div>
+        <div class="actions"><button class="btn" id="btnReload">Actualizar</button><button class="btn btn-primary" id="btnGoCompare">Ir al resumen</button></div>
+      </header>
+      <div class="year-cards" id="baseYears"></div>
+
+      <div id="baseCard" class="panel">
+        <details class="history"><summary>Ver la tabla de la base</summary><div class="table-wrap"><table id="tblBase" class="tbl"></table></div></details>
         <details class="history" id="brandsBox" open hidden><summary>Marcas detectadas</summary><p class="muted small" id="brandsNote"></p><div class="table-wrap"><table id="tblMarcas" class="tbl"></table></div></details>
         <details class="history" id="coordBox" open hidden><summary>Coordinadores</summary>
           <p class="muted small">Coordinadores guardados en la base. Un reemplazo cambia el nombre en lo ya guardado y en las próximas cargas.</p>
@@ -221,101 +225,158 @@
           <div class="hero-kpis" id="cmpKpis"></div>
         </header>
 
-        <div class="cmp-layout">
-          <aside class="slicers">
-            <div class="slicer">
-              <div class="slicer-head"><b>Años</b></div>
-              <div class="years-pick"><select id="cmpYearA" aria-label="Año base"></select><span>vs</span><select id="cmpYearB" aria-label="Año a comparar"></select></div>
+        <section class="period" aria-label="Período a comparar">
+          <div class="period-row">
+            <span class="period-label">Años</span>
+            <div class="years-pick"><select id="cmpYearA" aria-label="Año base"></select><span>vs</span><select id="cmpYearB" aria-label="Año a comparar"></select></div>
+            <div class="period-tools">
+              <label class="multi"><input type="checkbox" id="cmpMulti"> Elegir varios</label>
+              <button class="btn" id="cmpToCut" type="button">Volver al corte</button>
             </div>
-            <div class="slicer">
-              <div class="slicer-head"><b>Mes</b><button class="icon-btn" data-clear="months" title="Quitar filtro de mes">Limpiar</button></div>
-              <div class="chips" id="slMes"></div>
-            </div>
-            <div class="slicer" id="slSemWrap">
-              <div class="slicer-head"><b>Semanas</b><button class="icon-btn" data-clear="weeks" title="Quitar filtro de semana">Limpiar</button></div>
-              <div class="chips two" id="slSem"></div>
-            </div>
-            <div class="slicer" id="slDiaWrap">
-              <div class="slicer-head"><b>Día</b><button class="icon-btn" data-clear="days" title="Quitar filtro de día">Limpiar</button></div>
-              <div class="chips days" id="slDia"></div>
-            </div>
-            <label class="multi"><input type="checkbox" id="cmpMulti"> Elegir varios (o Ctrl + clic)</label>
-            <button class="btn btn-ghost-dark" id="cmpToCut">Volver al mes de corte</button>
-          </aside>
+          </div>
+          <div class="period-row">
+            <span class="period-label">Mes</span>
+            <div class="chips" id="slMes"></div>
+            <button class="icon-btn" data-clear="months" type="button">Todos</button>
+          </div>
+          <div class="period-row" id="slSemWrap">
+            <span class="period-label">Semanas</span>
+            <div class="chips" id="slSem"></div>
+            <button class="icon-btn" data-clear="weeks" type="button">Todas</button>
+          </div>
+          <div class="period-row" id="slDiaWrap">
+            <span class="period-label">Día</span>
+            <div class="chips days" id="slDia"></div>
+            <button class="icon-btn" data-clear="days" type="button">Todos</button>
+          </div>
+        </section>
 
-          <div class="cmp-main">
-            <div class="server-status" id="cmpNoStore" hidden>Para comparar por tienda o por coordinador, vuelve a subir los archivos: así se guarda el detalle diario por tienda y el coordinador.</div>
+        <nav class="subnav" aria-label="Secciones de la comparativa">
+          <a href="#cmpSecKey">Lo más importante</a>
+          <a href="#cmpSecWhy">De dónde viene la diferencia</a>
+          <a href="#cmpSecDetail">Detalle</a>
+          <a href="#cmpSecWeeks">Semana a semana</a>
+        </nav>
 
-            <section class="insights" id="cmpInsights" aria-label="Lo más importante"></section>
+        <div class="server-status" id="cmpNoStore" hidden>Para comparar por tienda o por coordinador, vuelve a subir los archivos: así se guarda el detalle diario por tienda y el coordinador.</div>
 
-            <div class="pair">
-              <article class="panel">
-                <h3>Cómo se llega de <span data-ya></span> a <span data-yb></span></h3>
-                <p class="panel-sub">Cada barra muestra cuánto suma o resta cada <span data-what></span> a la venta.</p>
-                <div class="chart-box sym"><canvas id="chartBridge" role="img" aria-label="Puente de la variación de ventas"></canvas></div>
-              </article>
-              <article class="panel">
-                <h3>Quién crece y quién cae</h3>
-                <p class="panel-sub">Variación % de <span data-yb></span> frente a <span data-ya></span>, ordenada de mayor a menor.</p>
-                <div class="chart-box sym"><canvas id="chartDiverge" role="img" aria-label="Variación porcentual por grupo"></canvas></div>
-              </article>
-            </div>
+        <section class="story" id="cmpSecKey">
+          <h2 class="story-title">Lo más importante</h2>
+          <div class="insights" id="cmpInsights"></div>
+        </section>
 
-            <details class="panel analysis-more">
-              <summary>Ver el análisis completo</summary>
-              <ul class="analysis" id="cmpAnalysis"></ul>
-            </details>
-
+        <section class="story" id="cmpSecWhy">
+          <h2 class="story-title">De dónde viene la diferencia</h2>
+          <div class="pair">
             <article class="panel">
-              <div class="panel-head"><h3>Soles por <span id="cmpByTitle">cadena</span></h3><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div>
-              <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
+              <h3>Cómo se llega de <span data-ya></span> a <span data-yb></span></h3>
+              <p class="panel-sub">Cada barra muestra cuánto suma o resta cada <span data-what></span> a la venta.</p>
+              <div class="chart-box sym"><canvas id="chartBridge" role="img" aria-label="Puente de la variación de ventas"></canvas></div>
             </article>
-            <article class="panel" id="cmpUndCard">
-              <div class="panel-head"><h3>Unidades</h3><button class="btn" data-copy="cmpUnd">Copiar tabla</button></div>
-              <div class="table-wrap"><table id="tblCmpUnd" class="tbl cmp"></table></div>
-            </article>
-            <article class="panel" id="cmpWeekCard">
-              <div class="panel-head"><h3>Soles por semana</h3><span class="legend" data-legend></span></div>
-              <div class="chart-box tall"><canvas id="chartCmpWeek" role="img" aria-label="Soles por semana y año"></canvas></div>
-              <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeek">Copiar tabla</button></div>
-              <div class="table-wrap"><table id="tblCmpWeek" class="tbl cmp wk"></table></div>
-            </article>
-            <article class="panel" id="cmpWeekUndCard">
-              <div class="panel-head"><h3>Unidades por semana</h3><span class="legend" data-legend></span></div>
-              <div class="chart-box tall"><canvas id="chartCmpWeekUnd" role="img" aria-label="Unidades por semana y año"></canvas></div>
-              <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeekUnd">Copiar tabla</button></div>
-              <div class="table-wrap"><table id="tblCmpWeekUnd" class="tbl cmp wk"></table></div>
+            <article class="panel">
+              <h3>Quién crece y quién cae</h3>
+              <p class="panel-sub">Variación % de <span data-yb></span> frente a <span data-ya></span>, ordenada de mayor a menor.</p>
+              <div class="chart-box sym"><canvas id="chartDiverge" role="img" aria-label="Variación porcentual por grupo"></canvas></div>
             </article>
           </div>
-        </div>
+          <details class="panel analysis-more">
+            <summary>Leer el análisis completo</summary>
+            <ul class="analysis" id="cmpAnalysis"></ul>
+          </details>
+        </section>
+
+        <section class="story" id="cmpSecDetail">
+          <div class="story-head">
+            <h2 class="story-title">Detalle por <span id="cmpByTitle">cadena</span></h2>
+            <div class="seg" role="tablist" aria-label="Medida del detalle" data-seg="detail">
+              <button type="button" class="on" data-unit="v">Soles</button><button type="button" data-unit="u">Unidades</button>
+            </div>
+          </div>
+          <article class="panel" id="cmpSolesCard">
+            <div class="panel-head"><h3>Soles</h3><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div>
+            <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
+          </article>
+          <article class="panel" id="cmpUndCard">
+            <div class="panel-head"><h3>Unidades</h3><button class="btn" data-copy="cmpUnd">Copiar tabla</button></div>
+            <div class="table-wrap"><table id="tblCmpUnd" class="tbl cmp"></table></div>
+          </article>
+        </section>
+
+        <section class="story" id="cmpSecWeeks">
+          <div class="story-head">
+            <h2 class="story-title">Semana a semana</h2>
+            <div class="seg" role="tablist" aria-label="Medida semanal" data-seg="weeks">
+              <button type="button" class="on" data-unit="v">Soles</button><button type="button" data-unit="u">Unidades</button>
+            </div>
+          </div>
+          <p class="muted small" id="cmpNoWeeks" hidden>No hay semanas para esta selección.</p>
+          <article class="panel" id="cmpWeekCard">
+            <div class="panel-head"><h3>Soles por semana</h3><span class="legend" data-legend></span></div>
+            <div class="chart-box tall"><canvas id="chartCmpWeek" role="img" aria-label="Soles por semana y año"></canvas></div>
+            <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeek">Copiar tabla</button></div>
+            <div class="table-wrap"><table id="tblCmpWeek" class="tbl cmp wk"></table></div>
+          </article>
+          <article class="panel" id="cmpWeekUndCard">
+            <div class="panel-head"><h3>Unidades por semana</h3><span class="legend" data-legend></span></div>
+            <div class="chart-box tall"><canvas id="chartCmpWeekUnd" role="img" aria-label="Unidades por semana y año"></canvas></div>
+            <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeekUnd">Copiar tabla</button></div>
+            <div class="table-wrap"><table id="tblCmpWeekUnd" class="tbl cmp wk"></table></div>
+          </article>
+        </section>
       </div>
     </section>
 
     <!-- ============ POR AÑO ============ -->
     <section id="view-anual" class="view" data-analysis>
-      <div class="kpis" id="kpis"></div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-head"><h2 id="ttlYtdChart">Acumulado al corte por año</h2></div>
-          <div class="chart-box"><canvas id="chartYears" role="img" aria-label="Venta acumulada al corte por año"></canvas></div>
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="hero-kicker">Evaluación por año · al corte de <span id="anualCut"></span></p>
+          <h2 class="hero-line" id="anualHeadline"></h2>
+          <p class="hero-sub" id="anualSub"></p>
         </div>
-        <div class="card">
-          <div class="card-head"><h2>Año completo por año</h2></div>
-          <div class="chart-box"><canvas id="chartYearsFull" role="img" aria-label="Venta de año completo por año"></canvas></div>
+        <div class="kpis hero-kpis-light" id="kpis"></div>
+      </header>
+
+      <section class="story">
+        <h2 class="story-title">La historia año por año</h2>
+        <ol class="timeline" id="anualTimeline"></ol>
+      </section>
+
+      <section class="story">
+        <h2 class="story-title">Comparación en igualdad de condiciones</h2>
+        <div class="pair">
+          <article class="panel">
+            <h3 id="ttlYtdChart">Acumulado al corte por año</h3>
+            <p class="panel-sub">Cada año sumado hasta el mismo punto del calendario.</p>
+            <div class="chart-box sym"><canvas id="chartYears" role="img" aria-label="Venta acumulada al corte por año"></canvas></div>
+          </article>
+          <article class="panel">
+            <h3>Año completo por año</h3>
+            <p class="panel-sub">El año en curso llega solo hasta el corte.</p>
+            <div class="chart-box sym"><canvas id="chartYearsFull" role="img" aria-label="Venta de año completo por año"></canvas></div>
+          </article>
         </div>
-      </div>
-      <div class="card" id="groupsCard" hidden>
-        <div class="card-head"><h2>Venta Paraíso vs Competencia (acumulado al corte)</h2><span class="legend" id="groupLegend"></span></div>
-        <div class="chart-box"><canvas id="chartGroups" role="img" aria-label="Venta Paraíso y venta competencia por año"></canvas></div>
-        <div class="card-head" style="margin-top:14px"><h2>Paraíso vs Competencia por año</h2><div class="actions"><button class="btn" data-copy="groups">Copiar tabla</button></div></div>
-        <div class="table-wrap"><table id="tblGroups" class="tbl"></table></div>
-        <p class="note">Venta Paraíso: PARAISO, VIVA-HOME, CASA JOVEN, KREA y KOMFORT. Venta Competencia: todas las demás marcas.</p>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Evaluación por año</h2><div class="actions"><button class="btn" data-copy="years">Copiar tabla</button></div></div>
-        <div class="table-wrap"><table id="tblYears" class="tbl"></table></div>
-        <p class="note" id="noteYears"></p>
-      </div>
+      </section>
+
+      <section class="story" id="groupsCard" hidden>
+        <h2 class="story-title">Paraíso frente a la competencia</h2>
+        <article class="panel">
+          <div class="panel-head"><h3>Venta acumulada al corte por grupo</h3><span class="legend" id="groupLegend"></span></div>
+          <div class="chart-box tall"><canvas id="chartGroups" role="img" aria-label="Venta Paraíso y venta competencia por año"></canvas></div>
+          <div class="panel-head sub"><h4>Paraíso vs Competencia por año</h4><button class="btn" data-copy="groups">Copiar tabla</button></div>
+          <div class="table-wrap"><table id="tblGroups" class="tbl cmp"></table></div>
+          <p class="note">Venta Paraíso: PARAISO, VIVA-HOME, CASA JOVEN, KREA y KOMFORT. Venta Competencia: todas las demás marcas.</p>
+        </article>
+      </section>
+
+      <section class="story">
+        <h2 class="story-title">Tabla completa</h2>
+        <article class="panel">
+          <div class="panel-head"><h3>Evaluación por año</h3><button class="btn" data-copy="years">Copiar tabla</button></div>
+          <div class="table-wrap"><table id="tblYears" class="tbl cmp"></table></div>
+          <p class="note" id="noteYears"></p>
+        </article>
+      </section>
     </section>
 
   </main>
