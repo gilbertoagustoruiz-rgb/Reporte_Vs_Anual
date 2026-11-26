@@ -674,7 +674,7 @@ body.locked main, body.locked .tabs, body.locked #dlGroup, body.locked .filter-h
 .mail-meta .mail-state { color: var(--text-3, #7C829E); font-size: 12px; }
 .mail-meta .mail-state.edited { color: #8A4B0B; }
 .mail-paper { background: #EEF1F8; border: 1px solid var(--border); border-radius: 0 0 14px 14px; padding: 22px; overflow-x: auto; }
-.mail-body { max-width: 680px; margin: 0 auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(27, 31, 75, .12); min-height: 300px; outline: none; }
+.mail-body { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(27, 31, 75, .12); min-height: 300px; outline: none; }
 .mail-body:focus { box-shadow: 0 0 0 2px var(--sky); }
 @media (max-width: 1000px) { .mail-side { position: static; } }
 @media print { .topbar, .scope-bar, .filter-handle, .drawer, .period, .subnav { display: none !important; } }

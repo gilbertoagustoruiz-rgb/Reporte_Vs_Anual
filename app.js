@@ -1378,47 +1378,71 @@
   }
 
   // Dibuja un gráfico de Chart.js fuera de pantalla y lo devuelve como imagen PNG (para incrustarlo en el correo).
-  async function chartImage(cfg) {
-    const W = 624, H = 270;
+  // opts: { height, horizontal (barras horizontales), valueLabels (cifra al final de cada barra) }
+  async function chartImage(cfg, opts = {}) {
+    const W = 552, H = opts.height || 250;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     cv.style.cssText = `position:fixed;left:-10000px;top:0;width:${W}px;height:${H}px`;
     document.body.appendChild(cv);
-    const tick = { color: '#6B7190', font: { size: 11 } };
+    const FONT_C = '"Segoe UI", Arial, Helvetica, sans-serif';
+    const tick = { color: '#6B7086', font: { size: 11, family: FONT_C } };
     const endLabels = {
       id: 'endLabels',
       afterDatasetsDraw(c) {
-        if (c.config.type !== 'line') return;
-        const x = c.ctx; x.save(); x.font = '700 12px "Plus Jakarta Sans", Segoe UI, Arial, sans-serif'; x.textBaseline = 'middle';
-        const labs = [];
-        c.data.datasets.forEach((ds, i) => {
-          if (ds.endLabel === false) return;
-          let k = ds.data.length - 1; while (k >= 0 && ds.data[k] == null) k--;
-          if (k < 0) return;
-          const pt = c.getDatasetMeta(i).data[k]; if (!pt) return;
-          const t = `${ds.label}: ${moneyShort(ds.data[k])}`, w = x.measureText(t).width;
-          labs.push({ t, w, color: ds.borderColor, px: Math.max(c.chartArea.left + 4, Math.min(pt.x + 8, c.chartArea.right - w - 4)), py: pt.y - 12 });
-        });
-        labs.sort((a, b) => a.py - b.py);
-        for (let i = 1; i < labs.length; i++) if (labs[i].py - labs[i - 1].py < 20) labs[i].py = labs[i - 1].py + 20;
-        for (const l of labs) {
-          l.py = Math.max(c.chartArea.top + 9, Math.min(c.chartArea.bottom - 9, l.py));
-          x.fillStyle = 'rgba(255,255,255,.92)'; x.fillRect(l.px - 4, l.py - 9, l.w + 8, 18);
-          x.fillStyle = l.color; x.fillText(l.t, l.px, l.py);
+        const x = c.ctx; x.save(); x.font = `700 12px ${FONT_C}`; x.textBaseline = 'middle';
+        if (c.config.type === 'line') {
+          const labs = [];
+          c.data.datasets.forEach((ds, i) => {
+            if (ds.endLabel === false) return;
+            let k = ds.data.length - 1; while (k >= 0 && ds.data[k] == null) k--;
+            if (k < 0) return;
+            const pt = c.getDatasetMeta(i).data[k]; if (!pt) return;
+            const t = `${ds.label}: ${moneyShort(ds.data[k])}`, w = x.measureText(t).width;
+            labs.push({ t, w, color: ds.borderColor, px: Math.max(c.chartArea.left + 4, Math.min(pt.x + 8, c.chartArea.right - w - 4)), py: pt.y - 12 });
+          });
+          labs.sort((a, b) => a.py - b.py);
+          for (let i = 1; i < labs.length; i++) if (labs[i].py - labs[i - 1].py < 20) labs[i].py = labs[i - 1].py + 20;
+          for (const l of labs) {
+            l.py = Math.max(c.chartArea.top + 9, Math.min(c.chartArea.bottom - 9, l.py));
+            x.fillStyle = 'rgba(255,255,255,.92)'; x.fillRect(l.px - 4, l.py - 9, l.w + 8, 18);
+            x.fillStyle = l.color; x.fillText(l.t, l.px, l.py);
+          }
+        }
+        if (opts.valueLabels) {
+          const ds = c.data.datasets[0], meta = c.getDatasetMeta(0);
+          meta.data.forEach((bar, i) => {
+            const v = ds.data[i]; if (v == null) return;
+            const t = (v > 0 ? '+' : '') + moneyShort(v), w = x.measureText(t).width;
+            x.fillStyle = v >= 0 ? '#0E7A5C' : '#C0283A';
+            if (opts.horizontal) {
+              const right = v >= 0;
+              let px = right ? bar.x + 6 : bar.x - 6 - w;
+              px = Math.max(c.chartArea.left + 2, Math.min(c.chartArea.right - w - 2, px));
+              x.fillText(t, px, bar.y);
+            }
+          });
         }
         x.restore();
       },
     };
     const bg = { id: 'bg', beforeDraw(c) { const x = c.ctx; x.save(); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.restore(); } };
+    const valueAxis = { beginAtZero: true, grid: { color: (g) => (g.tick.value === 0 ? '#8C90A6' : '#EEF0F5') }, border: { display: false }, ticks: { ...tick, callback: moneyTick, maxTicksLimit: 6 } };
+    const catAxis = { grid: { display: false }, border: { color: '#C9CCD8' }, ticks: { ...tick, maxRotation: 0, autoSkip: !opts.horizontal, maxTicksLimit: opts.horizontal ? 50 : 13, font: { size: opts.horizontal ? 12 : 11, weight: opts.horizontal ? '600' : '400', family: FONT_C }, color: opts.horizontal ? '#1F2230' : '#6B7086' } };
+    let xAxis = catAxis, yAxis = valueAxis;
+    if (opts.horizontal) {
+      const vals = cfg.data.datasets[0].data.filter((v) => v != null), mx = Math.max(1, ...vals.map(Math.abs));
+      const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+      xAxis = { ...valueAxis, display: false, min: lo < 0 ? lo - mx * .45 : 0, max: hi > 0 ? hi + mx * .45 : 0 };
+      yAxis = { ...catAxis, border: { display: false } };
+    }
     const chart = new Chart(cv, {
       ...cfg,
       options: {
+        indexAxis: opts.horizontal ? 'y' : 'x',
         responsive: false, animation: false, devicePixelRatio: 2,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        layout: { padding: { top: 10, right: 10, left: 2 } },
-        scales: {
-          x: { grid: { display: false }, border: { color: '#C9CEDF' }, ticks: { ...tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 13 } },
-          y: { beginAtZero: true, grid: { color: (g) => (g.tick.value === 0 ? '#9AA0BD' : '#EEF0F6') }, border: { display: false }, ticks: { ...tick, callback: moneyTick, maxTicksLimit: 6 } },
-        },
+        layout: { padding: { top: 8, right: 8, left: 2, bottom: 2 } },
+        scales: { x: xAxis, y: yAxis },
       },
       plugins: [bg, endLabels],
     });
@@ -1444,7 +1468,7 @@
 
     // Coordinadores: se piden al servidor con el mismo período (año anterior hasta la misma semana).
     let coord = null;
-    if (secs.has('coord')) {
+    {
       const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
       const body = { anios: [P, Y], por: 'coordinador', cadena: chain || undefined };
       if (per === 'week') body.semanas = [C.w];
@@ -1477,36 +1501,16 @@
       if (a || b) months.push({ m, n: MESES_LARGO[m - 1] + (m === C.m ? ' (al corte)' : ''), a, b, p: varPct(b, a) });
     }
 
-    // ---------- diseño del correo: tablas y estilos en línea (Gmail y Outlook los respetan)
+    // ---------- estilos de texto del análisis (en línea: Gmail y Outlook los respetan)
     const FONT = 'font-family:Segoe UI,Arial,Helvetica,sans-serif;';
-    const NIGHT = '#1B1F4B', INK = '#2B3050', GOOD = '#0E8F6B', BAD = '#D42E43', MUTED = '#6B7190', LINE = '#E4E7F1', SOFT = '#F4F6FC';
-    const C_Y = '#2F5BEA', C_P = '#7F86AA', C_PAR = '#D9620B', C_COMP = '#5B6188';
+    const GOOD = '#0E7A5C', BAD = '#C0283A', MUTED = '#6B7086';
     const col = (x) => (x > 0 ? GOOD : x < 0 ? BAD : MUTED);
     const strong = (x, t) => `<span style="color:${col(x)};font-weight:700">${t}</span>`;
     const pctC = (x) => (x == null || !isFinite(x) ? '—' : strong(x, pct(x)));
     const ppC = (x) => strong(x, ppTxt(x));
     const moneyC = (x) => strong(x, signMoney(x));
     const share = (x) => (x == null ? '—' : fmtPct.format(x));
-    const arrow = (x) => (x > 0 ? '▲' : x < 0 ? '▼' : '■');
-    const T0 = `cellpadding="0" cellspacing="0" border="0"`;
-    // Barra horizontal hecha con una tabla (funciona incluso en Outlook).
-    const bar = (frac, color, h = 10) => {
-      const w = Math.max(0, Math.min(100, Math.round((frac || 0) * 100)));
-      if (!w) return `<table ${T0} width="100%"><tr><td style="height:${h}px;font-size:0;line-height:0;background:${SOFT};border-radius:${h}px">&nbsp;</td></tr></table>`;
-      return `<table ${T0} width="100%"><tr><td width="${w}%" bgcolor="${color}" style="height:${h}px;font-size:0;line-height:0;background:${color};border-radius:${h}px">&nbsp;</td>${w < 100 ? `<td style="font-size:0;line-height:0">&nbsp;</td>` : ''}</tr></table>`;
-    };
-    // Barra divergente: hacia la izquierda en rojo si resta, hacia la derecha en verde si suma.
-    const dbar = (frac) => {
-      const w = Math.max(1, Math.min(100, Math.round(Math.abs(frac) * 100)));
-      const side = (on) => (on ? `<table ${T0} width="100%"><tr>${frac < 0 ? `<td style="font-size:0">&nbsp;</td><td width="${w}%" bgcolor="${BAD}" style="height:12px;font-size:0;line-height:0;background:${BAD};border-radius:6px 0 0 6px">&nbsp;</td>` : `<td width="${w}%" bgcolor="${GOOD}" style="height:12px;font-size:0;line-height:0;background:${GOOD};border-radius:0 6px 6px 0">&nbsp;</td><td style="font-size:0">&nbsp;</td>`}</tr></table>` : '&nbsp;');
-      return `<table ${T0} width="100%"><tr><td width="50%" style="border-right:2px solid ${INK}">${side(frac < 0)}</td><td width="50%">${side(frac > 0)}</td></tr></table>`;
-    };
-    const section = (title, sub, body) => `<tr><td style="padding:30px 28px 0;${FONT}">
-      <div style="font-size:18px;font-weight:800;color:${NIGHT};letter-spacing:-.2px">${title}</div>
-      ${sub ? `<div style="font-size:13px;color:${MUTED};margin-top:3px">${sub}</div>` : ''}
-      <div style="margin-top:14px">${body}</div></td></tr>`;
-    const legend = (items) => items.map(([c, t]) => `<span style="display:inline-block;margin-right:14px;font-size:12px;color:${MUTED}"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};vertical-align:-1px;margin-right:5px"></span>${t}</span>`).join('');
-
+    const T0 = `role="presentation" cellpadding="0" cellspacing="0" border="0"`;
     // ---------- análisis
     const pts = [];
     pts.push(`<b>Resultado:</b> en el ${perTxt} de ${Y} vendimos ${money(B)}${p == null ? '.' : `, ${pctC(p)} frente a ${P} (${moneyC(d)}).`}${per !== 'week' && wkBoth ? ` Para comparar parejo, ${P} se cuenta hasta la misma semana.` : ''}`);
@@ -1542,138 +1546,93 @@
     if (lastW && lastW.a > 0) { const pw = varPct(lastW.b, lastW.a); foco.push(pw >= 0 ? ['📈', `La semana ${C.w} viene fuerte`, `${pct(pw)} frente a la misma semana de ${P}: buen impulso para el cierre.`] : ['🔎', `Ojo con la semana ${C.w}`, `${pct(pw)} frente a la misma semana de ${P}.${lastW.open ? ' La semana todavía está en curso, así que puede mejorar.' : ' Conviene revisar qué pasó.'}`]); }
     if (perdidas) foco.push(['📍', `${perdidas} ${perdidas === 1 ? 'tienda sin venta' : 'tiendas sin venta'} este año`, `Vendían en ${P} y en ${Y} no registran venta. Revisar cobertura o exhibición.`]);
 
-    // ---------- gráficos (imágenes que viajan dentro del correo)
+    // ---------- formato ejecutivo: una pantalla, 3 cifras, 2 gráficos, 3 acciones
+    // Paleta de marca en un solo lugar (Below Group). Cambiar aquí si llegan los colores oficiales.
+    const BRAND = { dark: '#16181F', accent: '#F2A900', ink: '#1F2230', muted: '#6B7086', line: '#E6E8EF', good: '#0E7A5C', bad: '#C0283A' };
     const images = [];
     if (secs.has('graficos')) {
       const wkY = C.hasW && state.weekYears.has(Y) && state.weekYears.has(P);
       if (wkY) {
-        const maxWP = Math.max(C.w, ...[...R.byYW.keys()].filter((k) => Math.floor(k / 100) === P).map((k) => k % 100));
-        const labels = Array.from({ length: maxWP }, (_, i) => i + 1);
-        const wP = labels.map((w) => R.byYW.get(P * 100 + w) || 0);
-        const wY = labels.map((w) => (w <= C.w ? R.byYW.get(Y * 100 + w) || 0 : null));
-        const winW = labels.filter((w) => w <= C.w && wP[w - 1] > 0 && wY[w - 1] > wP[w - 1]).length;
-        images.push({ cid: 'ritmo', title: 'El ritmo de cada semana', sub: `${Y} le gana a ${P} en ${winW} de ${C.w} semanas. La línea punteada muestra lo que vendió ${P} en las semanas que faltan.`,
-          legend: [[C_Y, String(Y)], [C_P, String(P)]],
-          src: await chartImage({ type: 'line', data: { labels: labels.map((w) => 'S' + w), datasets: [
-            { label: String(P), data: wP, borderColor: C_P, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, tension: .3, endLabel: false },
-            { label: String(Y), data: wY, borderColor: C_Y, backgroundColor: 'rgba(47,91,234,.10)', fill: 'origin', borderWidth: 3, pointRadius: labels.map((w) => (w === C.w ? 5 : 0)), pointBackgroundColor: C_Y, tension: .3 },
-          ] } }) });
-        // Ventaja acumulada: cuánto le llevamos (o nos falta) al año anterior, semana a semana.
         let acc = 0;
-        const gap = labels.filter((w) => w <= C.w).map((w) => (acc += (wY[w - 1] || 0) - wP[w - 1]));
-        const peak = gap.reduce((m, v2, i) => (v2 > gap[m] ? i : m), 0), low = gap.reduce((m, v2, i) => (v2 < gap[m] ? i : m), 0);
-        images.push({ cid: 'ventaja', title: `Ventaja acumulada frente a ${P}`, sub: `Barras verdes: vamos por encima del año anterior; rojas: por debajo. ${gap[peak] > 0 ? `La mayor ventaja fue en la semana ${peak + 1} (${signMoney(gap[peak])}). ` : ''}${gap[low] < 0 ? `El punto más bajo, en la semana ${low + 1} (${signMoney(gap[low])}). ` : ''}Hoy: ${signMoney(gap[gap.length - 1])}.`,
-          legend: [['#14B88A', 'Por encima'], ['#F0475A', 'Por debajo']],
-          src: await chartImage({ type: 'bar', data: { labels: gap.map((_, i) => 'S' + (i + 1)), datasets: [
-            { label: 'Ventaja', data: gap, backgroundColor: gap.map((g) => (g >= 0 ? '#14B88A' : '#F0475A')), borderRadius: 2, barPercentage: .9, categoryPercentage: .9 },
-          ] } }) });
+        const gap = Array.from({ length: C.w }, (_, i) => (acc += (R.byYW.get(Y * 100 + i + 1) || 0) - (R.byYW.get(P * 100 + i + 1) || 0)));
+        const above = gap.filter((g) => g >= 0).length;
+        images.push({ cid: 'ventaja', title: `${above === gap.length ? 'Todo el año' : `${above} de ${gap.length} semanas`} por encima de ${P}`,
+          sub: `Ventaja acumulada semana a semana. Hoy: ${signMoney(gap[gap.length - 1])}.`,
+          src: await chartImage({ type: 'bar', data: { labels: gap.map((_, i) => 'S' + (i + 1)), datasets: [{ data: gap, backgroundColor: gap.map((g) => (g >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 2, barPercentage: .92, categoryPercentage: .92 }] } }, { height: 210 }) });
+      } else {
+        const ml = Array.from({ length: C.m }, (_, i) => MESES[i]);
+        const dm = ml.map((_, i) => (i + 1 === C.m ? cur.month - (prev?.month || 0) : (R.byYM.get(Y * 100 + i + 1) || 0) - (R.byYM.get(P * 100 + i + 1) || 0)));
+        images.push({ cid: 'ventaja', title: `Diferencia mes a mes frente a ${P}`, sub: 'Verde: el mes vendió más que el año anterior; rojo: menos.',
+          src: await chartImage({ type: 'bar', data: { labels: ml, datasets: [{ data: dm, backgroundColor: dm.map((g) => (g >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 3 }] } }, { height: 210 }) });
       }
-      const ml = Array.from({ length: 12 }, (_, i) => MESES[i]);
-      const mval = (y, i) => (i + 1 === C.m ? (y === Y ? cur.month : prev?.month || 0) : R.byYM.get(y * 100 + i + 1) || 0);
-      images.push({ cid: 'meses', title: `Mes a mes: ${Y} frente a ${P}`, sub: `${C.monthLabel} se compara hasta el mismo día de corte en ambos años; los meses siguientes todavía no se juegan.`,
-        legend: [[C_Y, String(Y)], [C_P, String(P)]],
-        src: await chartImage({ type: 'bar', data: { labels: ml, datasets: [
-          { label: String(P), data: ml.map((_, i) => mval(P, i)), backgroundColor: C_P, borderRadius: 4, barPercentage: .8, categoryPercentage: .7 },
-          { label: String(Y), data: ml.map((_, i) => (i + 1 > C.m ? null : mval(Y, i))), backgroundColor: C_Y, borderRadius: 4, barPercentage: .8, categoryPercentage: .7 },
-        ] } }) });
+    }
+    if (secs.has('cadenas')) {
+      const src = chain ? stores.map((x) => ({ n: x.n, d: x.d })) : chains.map((x) => ({ n: x.n, d: x.d }));
+      const top = [...src].filter((x) => x.d).sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 8).sort((a, b) => b.d - a.d);
+      if (top.length) {
+        const nUp = src.filter((x) => x.d > 0).length;
+        images.push({ cid: 'cadenas', title: chain ? `Quién empuja y quién frena en ${esc(chain)}` : 'Quién empuja y quién frena',
+          sub: `${nUp} de ${src.filter((x) => x.d).length} ${chain ? 'tiendas' : 'cadenas'} venden más que en ${P}${src.length > 8 ? '. Se muestran las 8 que más se mueven' : ''}.`,
+          src: await chartImage({ type: 'bar', data: { labels: top.map((x) => (x.n.length > 22 ? x.n.slice(0, 21) + '…' : x.n)), datasets: [{ data: top.map((x) => x.d), backgroundColor: top.map((x) => (x.d >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 3, barPercentage: .7, categoryPercentage: .9 }] } }, { horizontal: true, valueLabels: true, height: 30 + top.length * 32 }) });
+      }
     }
     mail.images = images;
 
-    // ---------- armado
-    const parts = [];
-    // Cabecera
-    const verdict = p == null ? 'Sin base de comparación' : p >= 0.05 ? 'Crecimiento fuerte' : p > 0 ? 'Vamos arriba' : p > -0.05 ? 'Por debajo, pero cerca' : 'Alerta: caída importante';
-    parts.push(`<tr><td bgcolor="${NIGHT}" style="background:${NIGHT};background-image:linear-gradient(135deg,#1B1F4B 0%,#2A2F6B 60%,#3D3A7A 100%);padding:30px 28px 26px;border-radius:10px 10px 0 0;${FONT}color:#fff">
-      <div style="font-size:12px;color:#C9CEEA;letter-spacing:.2px">Reporte Vs Anual · Corte ${esc(C.dateText)}${C.hasW ? ` · semana ${C.w}` : ''}${chain ? ` · ${esc(chain)}` : ''}</div>
-      <div style="margin-top:14px"><span style="display:inline-block;background:${p == null ? '#3A3F7A' : d >= 0 ? '#0E8F6B' : '#C2283B'};color:#fff;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px">${arrow(d)} ${esc(verdict)}</span></div>
-      <div style="font-size:46px;font-weight:800;line-height:1.05;margin-top:12px;letter-spacing:-1px">${moneyShort(B)}</div>
-      <div style="font-size:15px;color:#DDE1F5;margin-top:6px">${esc(perTxt.charAt(0).toUpperCase() + perTxt.slice(1))} de ${Y}${p == null ? '' : ` · <b style="color:${d >= 0 ? '#7CF0C8' : '#FF9AA6'}">${pct(p)}</b> vs ${P} (${signMoney(d)})`}</div>
-      ${avance != null ? `<div style="margin-top:20px;font-size:12px;color:#C9CEEA">Llevamos el <b style="color:#fff">${fmtPct.format(avance)}</b> de todo lo vendido en ${P} (${moneyShort(fullA)})</div>
-      <table ${T0} width="100%" style="margin-top:6px"><tr><td width="${Math.min(100, Math.round(avance * 100))}%" style="height:8px;font-size:0;line-height:0;background:#7CF0C8;border-radius:8px">&nbsp;</td>${avance < 1 ? `<td style="height:8px;font-size:0;line-height:0;background:#3A3F7A;border-radius:8px">&nbsp;</td>` : ''}</tr></table>` : ''}
+    const F_ = 'font-family:Segoe UI,Arial,Helvetica,sans-serif;';
+    const pctTxt = (x) => (x == null || !isFinite(x) ? '—' : pct(x));
+    const tone = (x) => (x > 0 ? BRAND.good : x < 0 ? BRAND.bad : BRAND.muted);
+    const rows = [];
+    // Marca
+    rows.push(`<tr><td bgcolor="${BRAND.dark}" style="background:${BRAND.dark};padding:16px 24px;${F_}">
+      <table ${T0} width="100%"><tr>
+        <td style="${F_}font-size:13px;font-weight:700;color:#fff;letter-spacing:1.5px">BELOW GROUP</td>
+        <td align="right" style="${F_}font-size:12px;color:#B7BACB">Reporte Vs Anual · Corte ${esc(C.dateText)}${C.hasW ? ` · Sem ${C.w}` : ''}</td>
+      </tr></table></td></tr>
+      <tr><td bgcolor="${BRAND.accent}" style="background:${BRAND.accent};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>`);
+    // Titular
+    const projTxt = proj != null ? ` A este ritmo cerraríamos ${Y} en <b>${moneyShort(proj)}</b>.` : '';
+    rows.push(`<tr><td style="padding:30px 24px 6px;${F_}">
+      <div style="font-size:13px;color:${BRAND.muted}">${esc(perTxt.charAt(0).toUpperCase() + perTxt.slice(1))}${chain ? ` · ${esc(chain)}` : ''}</div>
+      <div style="font-size:56px;line-height:1;font-weight:800;color:${tone(d)};letter-spacing:-1.5px;margin-top:8px">${p == null ? moneyShort(B) : pctTxt(p)}</div>
+      <div style="font-size:17px;color:${BRAND.ink};margin-top:8px">${p == null ? `en ${Y}` : `frente al mismo corte de ${P}`} · <b>${moneyShort(B)}</b> vendidos${p == null ? '' : ` (${d >= 0 ? '+' : ''}${moneyShort(d)})`}</div>
+      <div style="font-size:15px;line-height:1.55;color:${BRAND.ink};margin-top:16px">Hola equipo: ${p == null ? `vamos ${moneyShort(B)} en ${Y}.` : d >= 0 ? `vamos <b style="color:${BRAND.good}">${pctTxt(p)}</b> arriba del año pasado.` : `vamos <b style="color:${BRAND.bad}">${pctTxt(p)}</b> abajo del año pasado.`}${projTxt}</div>
     </td></tr>`);
-    // Saludo
-    parts.push(`<tr><td style="padding:24px 28px 0;${FONT}color:${INK};font-size:14.5px;line-height:1.6">
-      <p style="margin:0 0 8px">Hola equipo,</p>
-      <p style="margin:0">Les comparto cómo vamos en el ${perTxt} de ${Y} frente al mismo corte de ${P}${chain ? ` en ${esc(chain)}` : ''}. Abajo está el detalle con gráficos y dónde conviene poner el foco.</p></td></tr>`);
-    // Indicadores
+    // Tres cifras
     if (secs.has('kpis')) {
-      const tiles = [[`${perShort} ${Y}`, moneyShort(B), prev ? `${pctC(p)} vs ${P}` : '', prev ? Math.min(1, B / Math.max(A, B)) : null, C_Y]];
-      if (proj != null) tiles.push(['Proyección de cierre', moneyShort(proj), `${pctC(varPct(proj, fullA))} vs ${P} completo`, Math.min(1, proj / Math.max(proj, fullA)), '#14B88A']);
-      if (state.hasBrand && shB != null) tiles.push(['Participación Paraíso', share(shB), shA != null ? `${ppC(shB - shA)} vs ${P}` : '', shB, C_PAR]);
-      if (lastW && lastW.a > 0) tiles.push([`Semana ${C.w}${lastW.open ? ' (en curso)' : ''}`, moneyShort(lastW.b), `${pctC(varPct(lastW.b, lastW.a))} vs ${P}`, Math.min(1, lastW.b / Math.max(lastW.a, lastW.b)), C_Y]);
-      else tiles.push(['Tiendas con venta', num(stores.filter((x) => x.b).length), prev ? `${num(stores.filter((x) => x.a).length)} en ${P}` : '', null, C_Y]);
-      const rows = [];
-      for (let i = 0; i < tiles.length; i += 2) rows.push(tiles.slice(i, i + 2));
-      parts.push(`<tr><td style="padding:22px 20px 0">${rows.map((r) => `<table ${T0} width="100%" style="border-collapse:separate;border-spacing:8px 8px;${FONT}"><tr>${r.map(([l, v2, f, frac, c]) => `<td width="50%" valign="top" style="background:${SOFT};border-radius:10px;padding:14px 16px">
-        <div style="font-size:12px;color:${MUTED}">${l}</div>
-        <div style="font-size:26px;font-weight:800;color:${NIGHT};margin:4px 0 2px;letter-spacing:-.5px">${v2}</div>
-        <div style="font-size:12.5px;color:${MUTED};margin-bottom:${frac == null ? 0 : 10}px">${f}</div>${frac == null ? '' : bar(frac, c, 6)}</td>`).join('')}${r.length === 1 ? '<td width="50%"></td>' : ''}</tr></table>`).join('')}
-        ${proj != null ? `<div style="${FONT}font-size:11.5px;color:${MUTED};padding:0 8px">La proyección es una estimación: aplica a ${Y} el mismo ritmo que tuvo ${P} entre el corte y fin de año.</div>` : ''}</td></tr>`);
+      const k = [];
+      if (proj != null) k.push(['Proyección de cierre', moneyShort(proj), `${pctTxt(varPct(proj, fullA))} vs ${P}`, varPct(proj, fullA)]);
+      if (state.hasBrand && shB != null) k.push(['Participación Paraíso', share(shB), shA != null ? `${ppTxt(shB - shA)} vs ${P}` : '', shA != null ? shB - shA : null]);
+      if (lastW && lastW.a > 0) k.push([`Semana ${C.w}${lastW.open ? ' (en curso)' : ''}`, pctTxt(varPct(lastW.b, lastW.a)), `${moneyShort(lastW.b)} vendidos`, varPct(lastW.b, lastW.a)]);
+      if (k.length < 3) k.push(['Tiendas con venta', num(stores.filter((x) => x.b).length), prev ? `${num(stores.filter((x) => x.a).length)} en ${P}` : '', null]);
+      const cells = k.slice(0, 3);
+      rows.push(`<tr><td style="padding:22px 24px 4px"><table ${T0} width="100%" style="border-top:1px solid ${BRAND.line};border-bottom:1px solid ${BRAND.line}"><tr>${cells.map(([l, v2, f, dir], i) => `<td width="${Math.floor(100 / cells.length)}%" valign="top" style="padding:16px ${i === cells.length - 1 ? 0 : 12}px 16px ${i ? 14 : 0}px;${i ? `border-left:1px solid ${BRAND.line};` : ''}${F_}">
+        <div style="font-size:12px;color:${BRAND.muted}">${l}</div>
+        <div style="font-size:26px;font-weight:800;color:${l.startsWith('Semana') ? tone(dir) : BRAND.ink};margin-top:4px;letter-spacing:-.5px;white-space:nowrap">${v2}</div>
+        <div style="font-size:12.5px;color:${dir == null || l.startsWith('Semana') ? BRAND.muted : tone(dir)};margin-top:2px">${f}</div></td>`).join('')}</tr></table></td></tr>`);
     }
-    // En 30 segundos
+    // Resumen en viñetas (opcional)
     if (secs.has('puntos') && pts.length) {
-      parts.push(section('En 30 segundos', '', `<table ${T0} width="100%" style="${FONT}">${pts.map((t) => `<tr><td valign="top" width="18" style="padding:0 0 10px;color:${C_Y};font-size:16px;line-height:1.5">●</td><td style="padding:0 0 10px;font-size:14px;line-height:1.55;color:${INK}">${t}</td></tr>`).join('')}</table>`));
+      rows.push(`<tr><td style="padding:22px 24px 0;${F_}"><table ${T0} width="100%">${pts.map((t) => `<tr><td valign="top" width="16" style="${F_}font-size:15px;line-height:1.55;color:${BRAND.accent}">•</td><td style="${F_}font-size:14px;line-height:1.55;color:${BRAND.ink};padding-bottom:8px">${t}</td></tr>`).join('')}</table></td></tr>`);
     }
     // Gráficos
     for (const im of images) {
-      parts.push(section(im.title, im.sub, `<div>${legend(im.legend)}</div><img src="${im.src}" data-cid="${im.cid}" width="624" alt="${esc(im.title)}" style="display:block;width:100%;max-width:624px;height:auto;margin-top:8px;border:0">`));
+      rows.push(`<tr><td style="padding:28px 24px 0;${F_}">
+        <div style="font-size:18px;font-weight:800;color:${BRAND.ink};letter-spacing:-.2px">${im.title}</div>
+        <div style="font-size:13px;color:${BRAND.muted};margin-top:3px">${im.sub}</div>
+        <img src="${im.src}" data-cid="${im.cid}" width="552" alt="${esc(im.title)}" style="display:block;width:100%;max-width:552px;height:auto;margin-top:12px;border:0"></td></tr>`);
     }
-    // Paraíso vs competencia
-    if (secs.has('paraiso') && state.hasBrand && shB != null) {
-      const row = (yr, sh, vp, vc) => `<tr><td width="52" style="${FONT}font-size:13px;font-weight:700;color:${NIGHT};padding:6px 0">${yr}</td><td style="padding:6px 0">
-        <table ${T0} width="100%"><tr><td width="${Math.round(sh * 100)}%" bgcolor="${C_PAR}" style="background:${C_PAR};height:26px;border-radius:6px 0 0 6px;${FONT}font-size:12px;font-weight:700;color:#fff;padding-left:8px;white-space:nowrap">${share(sh)}</td><td bgcolor="${C_COMP}" style="background:${C_COMP};height:26px;border-radius:0 6px 6px 0;${FONT}font-size:12px;font-weight:700;color:#fff;text-align:right;padding-right:8px;white-space:nowrap">${share(1 - sh)}</td></tr></table></td></tr>`;
-      parts.push(section('Paraíso vs competencia', `Participación sobre la venta con marca · ${legend([[C_PAR, 'Paraíso'], [C_COMP, 'Competencia']])}`,
-        `<table ${T0} width="100%">${shA != null ? row(P, shA) : ''}${row(Y, shB)}</table>
-        <table ${T0} width="100%" style="margin-top:12px;border-collapse:separate;border-spacing:0 0;${FONT}"><tr>
-          <td width="50%" style="padding-right:6px"><div style="background:#FFF3EA;border-radius:10px;padding:12px 14px"><div style="font-size:12px;color:${MUTED}">Venta Paraíso</div><div style="font-size:20px;font-weight:800;color:${NIGHT}">${moneyShort(pB)}</div><div style="font-size:12.5px">${pA ? pctC(varPct(pB, pA)) + ` vs ${P}` : ''}</div></div></td>
-          <td width="50%" style="padding-left:6px"><div style="background:${SOFT};border-radius:10px;padding:12px 14px"><div style="font-size:12px;color:${MUTED}">Venta competencia</div><div style="font-size:20px;font-weight:800;color:${NIGHT}">${moneyShort(cB)}</div><div style="font-size:12.5px">${cA ? pctC(varPct(cB, cA)) + ` vs ${P}` : ''}</div></div></td>
-        </tr></table>`));
-    }
-    // Cadenas: peso y de dónde sale la diferencia
-    if (secs.has('cadenas') && chains.length && !chain) {
-      const TB = chains.reduce((s, x) => s + x.b, 0), maxAbs = Math.max(1, ...chains.map((x) => Math.abs(x.d)));
-      const top = chains.slice(0, 12);
-      const rows = top.map((x, i) => `<tr style="${i % 2 ? `background:#FAFBFE;` : ''}">
-        <td style="padding:9px 8px;${FONT}font-size:13px;font-weight:700;color:${INK}">${esc(x.n)}<div style="font-weight:400;font-size:11.5px;color:${MUTED}">${moneyShort(x.b)} · ${share(TB ? x.b / TB : null)} del total</div></td>
-        <td width="170" style="padding:9px 8px">${dbar(x.d / maxAbs)}</td>
-        <td width="96" align="right" style="padding:9px 8px;${FONT}font-size:13px;white-space:nowrap">${moneyC(x.d)}<div style="font-size:11.5px">${x.a ? pctC(varPct(x.b, x.a)) : '<span style="color:' + MUTED + '">nueva</span>'}</div></td></tr>`).join('');
-      parts.push(section('¿De dónde sale la diferencia?', `Cuánto suma o resta cada cadena frente a ${P}. A la derecha, en verde, las que suman; a la izquierda, en rojo, las que restan.`,
-        `<table ${T0} width="100%" style="border-top:1px solid ${LINE}">${rows}</table>${chains.length > 12 ? `<div style="${FONT}font-size:12px;color:${MUTED};margin-top:6px">Y ${chains.length - 12} cadenas más en el Excel adjunto.</div>` : ''}`));
-    }
-    // Tiendas
-    if (secs.has('tiendas') && stores.length) {
-      const stat = (n, l, c) => `<td width="25%" align="center" style="padding:10px 4px;background:${SOFT};border-radius:10px;${FONT}"><div style="font-size:24px;font-weight:800;color:${c}">${n}</div><div style="font-size:11.5px;color:${MUTED}">${l}</div></td>`;
-      const maxS = Math.max(1, ...[...up.slice(0, 5), ...down.slice(0, 5)].map((x) => Math.abs(x.d)));
-      const list = (arr, c) => arr.slice(0, 5).map((x) => `<tr><td style="padding:7px 0;${FONT}font-size:13px;color:${INK}"><b>${esc(x.n)}</b> <span style="color:${MUTED};font-size:12px">· ${esc(x.c)}</span><div style="margin-top:5px">${bar(Math.abs(x.d) / maxS, c, 8)}</div></td><td width="104" align="right" valign="bottom" style="padding:7px 0 7px 10px;${FONT}font-size:13px;white-space:nowrap">${moneyC(x.d)}</td></tr>`).join('');
-      parts.push(section('Las tiendas', '',
-        `<table ${T0} width="100%" style="border-collapse:separate;border-spacing:6px 0"><tr>${stat(up.length, 'crecen', GOOD)}${stat(down.length, 'caen', BAD)}${stat(nuevas, `nuevas en ${Y}`, C_Y)}${stat(perdidas, 'sin venta este año', MUTED)}</tr></table>
-        ${up.length ? `<div style="${FONT}font-size:14px;font-weight:700;color:${GOOD};margin:18px 0 2px">▲ Las que más suben</div><table ${T0} width="100%">${list(up, '#14B88A')}</table>` : ''}
-        ${down.length ? `<div style="${FONT}font-size:14px;font-weight:700;color:${BAD};margin:18px 0 2px">▼ Las que más bajan</div><table ${T0} width="100%">${list(down, '#F0475A')}</table>` : ''}`));
-    }
-    // Coordinadores
-    if (secs.has('coord') && coord?.length) {
-      const maxC = Math.max(1, ...coord.map((o) => Math.max(o.a, o.b)));
-      parts.push(section('Coordinadores', `Venta ${Y} (barra azul) frente a ${P} (barra gris)`,
-        `<table ${T0} width="100%">${coord.map((o) => `<tr><td style="padding:8px 0;${FONT}font-size:13px;color:${INK}"><b>${esc(o.n)}</b><div style="margin-top:5px">${bar(o.b / maxC, C_Y, 8)}</div><div style="margin-top:3px">${bar(o.a / maxC, C_P, 5)}</div></td><td width="110" align="right" valign="top" style="padding:8px 0 8px 10px;${FONT}font-size:13px;white-space:nowrap"><b>${moneyShort(o.b)}</b><div style="font-size:12px">${o.a ? pctC(varPct(o.b, o.a)) : ''}</div></td></tr>`).join('')}</table>`));
-    }
-    // Mes a mes como mapa de calor
-    if (secs.has('meses') && months.length) {
-      const heat = (x) => (x == null ? '#EEF0F6' : x >= .1 ? '#0E8F6B' : x >= .03 ? '#3FBF95' : x > 0 ? '#A9E5CF' : x > -.03 ? '#F7C1C8' : x > -.1 ? '#EE7C8A' : '#C2283B');
-      const ink = (x) => (x == null || (x > -.03 && x < .03) ? INK : '#fff');
-      const cells = Array.from({ length: 12 }, (_, i) => months.find((x) => x.m === i + 1) || { m: i + 1, p: null, fut: i + 1 > C.m });
-      parts.push(section('Mes a mes', `Variación de cada mes frente al mismo mes de ${P}${bestM ? ` · mejor: ${bestM.n.toLowerCase()}, más flojo: ${worstM.n.toLowerCase()}` : ''}`,
-        `<table ${T0} width="100%" style="border-collapse:separate;border-spacing:3px 0"><tr>${cells.map((x) => `<td align="center" bgcolor="${heat(x.p)}" style="background:${heat(x.p)};border-radius:6px;padding:9px 0;${FONT}color:${ink(x.p)}"><div style="font-size:11px;font-weight:700">${MESES[x.m - 1]}</div><div style="font-size:11px;margin-top:2px">${x.p == null ? (x.fut ? '·' : '—') : (x.p > 0 ? '+' : '') + Math.round(x.p * 100) + '%'}</div></td>`).join('')}</tr></table>`));
-    }
-    // Foco
+    // Acciones
     if (secs.has('foco') && foco.length) {
-      parts.push(section('Dónde poner el foco', 'Sugerencias armadas a partir de los números de este corte',
-        foco.map(([ic, t, s]) => `<table ${T0} width="100%" style="margin-bottom:8px;background:${SOFT};border-radius:10px;${FONT}"><tr><td width="44" align="center" valign="top" style="padding:14px 0 0;font-size:20px">${ic}</td><td style="padding:12px 14px 12px 0"><div style="font-size:14px;font-weight:700;color:${NIGHT}">${t}</div><div style="font-size:13px;color:${INK};margin-top:2px;line-height:1.5">${s}</div></td></tr></table>`).join('')));
+      rows.push(`<tr><td style="padding:30px 24px 0;${F_}">
+        <div style="font-size:18px;font-weight:800;color:${BRAND.ink}">Tres acciones para esta semana</div>
+        <table ${T0} width="100%" style="margin-top:10px">${foco.slice(0, 3).map(([, t, s2]) => `<tr><td valign="top" width="26" style="padding:12px 0;border-top:1px solid ${BRAND.line};${F_}font-size:18px;font-weight:800;color:${BRAND.accent};line-height:1.2">→</td><td style="padding:12px 0;border-top:1px solid ${BRAND.line};${F_}"><div style="font-size:15px;font-weight:700;color:${BRAND.ink}">${t}</div><div style="font-size:13.5px;color:${BRAND.muted};margin-top:3px;line-height:1.5">${s2}</div></td></tr>`).join('')}</table></td></tr>`);
     }
     // Cierre
-    parts.push(`<tr><td style="padding:30px 28px 30px;${FONT}color:${INK};font-size:14px;line-height:1.6">
-      <table ${T0}><tr><td bgcolor="${C_Y}" style="background:${C_Y};border-radius:999px"><a href="${esc(location.origin + location.pathname)}" style="display:inline-block;padding:11px 22px;${FONT}font-size:14px;font-weight:700;color:#fff;text-decoration:none">Ver el reporte completo</a></td></tr></table>
-      <p style="margin:22px 0 0">Saludos,<br><b>${esc(session.user?.nombre || '')}</b></p></td></tr>`);
-    $('#mlBody').innerHTML = `<table ${T0} width="100%" style="max-width:680px;background:#fff;border-radius:10px">${parts.join('\n')}</table>`;
+    rows.push(`<tr><td style="padding:28px 24px 30px;${F_}">
+      <table ${T0}><tr><td bgcolor="${BRAND.dark}" style="background:${BRAND.dark};border-radius:6px"><a href="${esc(location.origin + location.pathname)}" style="display:inline-block;padding:12px 22px;${F_}font-size:14px;font-weight:700;color:#fff;text-decoration:none">Ver el reporte completo</a></td></tr></table>
+      <div style="font-size:13px;color:${BRAND.muted};margin-top:14px">El detalle por cadena, tienda, coordinador y mes va en el Excel adjunto.</div>
+      <div style="font-size:14px;color:${BRAND.ink};margin-top:22px">Saludos,<br><b>${esc(session.user?.nombre || '')}</b></div></td></tr>`);
+    $('#mlBody').innerHTML = `<table ${T0} width="100%" style="max-width:600px;background:#fff">${rows.join('\n')}</table>`;
 
     // Asunto por defecto (si el administrador no lo cambió a mano).
     const subj = `Reporte Vs Anual · ${perShort} al ${C.dateText}${chain ? ` · ${chain}` : ''}: ${Y} ${p == null ? moneyShort(B) : pct(p) + ' vs ' + P}`;
