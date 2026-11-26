@@ -36,6 +36,21 @@
         <p class="muted small">Esto es lo que ven todas las personas que abren el reporte.</p>
         <div class="table-wrap"><table id="tblBase" class="tbl"></table></div>
         <details class="history" id="brandsBox" open hidden><summary>Marcas detectadas</summary><p class="muted small" id="brandsNote"></p><div class="table-wrap"><table id="tblMarcas" class="tbl"></table></div></details>
+        <details class="history" id="coordBox" open hidden><summary>Coordinadores</summary>
+          <p class="muted small">Coordinadores guardados en la base. Un reemplazo cambia el nombre en lo ya guardado y en las próximas cargas.</p>
+          <div class="grid-2 coord-grid">
+            <div class="table-wrap"><table id="tblCoord" class="tbl"></table></div>
+            <div>
+              <div class="table-wrap"><table id="tblRepl" class="tbl"></table></div>
+              <form id="formRepl" class="repl-form">
+                <label>Nombre actual<input name="original" list="coordList" required placeholder="Ej. DIEGO AMIAS"></label>
+                <label>Nuevo nombre<input name="nuevo" required placeholder="Ej. HERLES CORNELIO"></label>
+                <button class="btn btn-primary" type="submit">Reemplazar</button>
+                <datalist id="coordList"></datalist>
+              </form>
+            </div>
+          </div>
+        </details>
         <details class="history"><summary>Últimas cargas</summary><div class="table-wrap"><table id="tblCargas" class="tbl"></table></div></details>
       </div>
 
@@ -133,12 +148,17 @@
         <div class="cmp-main">
           <div class="filters card cmp-by">
             <div class="f"><label>Ver por</label>
-              <select id="cmpBy"><option value="cadena">Cadena</option><option value="marca">Marca</option><option value="tipo">Paraíso vs Competencia</option></select>
+              <select id="cmpBy"><option value="cadena">Cadena</option><option value="tienda">Tienda</option><option value="coordinador">Coordinador</option><option value="marca">Marca</option><option value="tipo">Paraíso vs Competencia</option></select>
             </div>
             <p class="period-note" id="cmpNote"></p>
           </div>
+          <div class="card analysis-card">
+            <div class="card-head"><h2>Análisis del Vs</h2></div>
+            <ul class="analysis" id="cmpAnalysis"></ul>
+          </div>
+          <div class="server-status" id="cmpNoStore" hidden>La comparativa por tienda y por coordinador necesita volver a subir los archivos (se agregó el detalle diario por tienda y la columna Coordinador).</div>
           <div class="card">
-            <div class="card-head"><h2>Soles</h2><div class="actions"><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div></div>
+            <div class="card-head"><h2>Soles por <span id="cmpByTitle">Cadena</span></h2><div class="actions"><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div></div>
             <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
           </div>
           <div class="card" id="cmpUndCard">

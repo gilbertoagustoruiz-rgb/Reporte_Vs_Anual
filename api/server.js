@@ -85,7 +85,38 @@ async function migrate() {
       unidades  numeric(16,2) NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS ventas_dia_anio_idx ON ${SCHEMA}.ventas_dia (anio);
+    -- Detalle diario por tienda y coordinador, para la comparativa por tienda y por coordinador (se calcula en el servidor).
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.ventas_tienda_dia (
+      anio        int NOT NULL,
+      mes         smallint NOT NULL,
+      semana      smallint NOT NULL DEFAULT 0,
+      dia         smallint NOT NULL DEFAULT 0,
+      cadena      text NOT NULL,
+      tienda      text NOT NULL,
+      coordinador text NOT NULL DEFAULT '',
+      marca       text NOT NULL DEFAULT '',
+      cobertura   smallint,
+      venta       numeric(16,2) NOT NULL,
+      unidades    numeric(16,2) NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS ventas_tienda_dia_anio_mes_idx ON ${SCHEMA}.ventas_tienda_dia (anio, mes);
+    -- Nombres unificados en mayúsculas (los archivos traían "Tottus" y "TOTTUS", etc.).
+    UPDATE ${SCHEMA}.ventas SET cadena = upper(cadena), tienda = upper(tienda), marca = upper(marca)
+      WHERE cadena <> upper(cadena) OR tienda <> upper(tienda) OR marca <> upper(marca);
+    UPDATE ${SCHEMA}.ventas_dia SET cadena = upper(cadena), marca = upper(marca)
+      WHERE cadena <> upper(cadena) OR marca <> upper(marca);
   `);
+  const existed = await pool.query(`SELECT to_regclass('${SCHEMA}.reemplazos') IS NOT NULL AS ok`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA}.reemplazos (
+      tipo      text NOT NULL,
+      original  text NOT NULL,
+      nuevo     text NOT NULL,
+      creado_en timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tipo, original)
+    )`);
+  if (!existed.rows[0].ok) {
+    await pool.query(`INSERT INTO ${SCHEMA}.reemplazos (tipo, original, nuevo) VALUES ('coordinador', 'DIEGO AMIAS', 'HERLES CORNELIO') ON CONFLICT DO NOTHING`);
+  }
   const { ADMIN_DNI, ADMIN_PASSWORD, ADMIN_NOMBRE } = process.env;
   if (ADMIN_DNI && ADMIN_PASSWORD) {
     if (ADMIN_PASSWORD.length < 8) console.warn('ADMIN_PASSWORD debe tener al menos 8 caracteres: no se creó el administrador.');
@@ -95,6 +126,13 @@ async function migrate() {
       if (r.rowCount) console.log('Administrador inicial creado:', ADMIN_DNI);
     }
   }
+}
+
+// ---------------------------------------------------------------- textos
+const clean = (v, n = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, n);
+async function coordMap(client = pool) {
+  const r = await client.query(`SELECT original, nuevo FROM ${SCHEMA}.reemplazos WHERE tipo = 'coordinador'`);
+  return new Map(r.rows.map((x) => [x.original, x.nuevo]));
 }
 
 // ---------------------------------------------------------------- contraseñas y sesiones
@@ -190,6 +228,58 @@ app.get('/api/dias', wrap(async (req, res) => {
   res.json({ dict, rows });
 }));
 
+// Comparativa por tienda o por coordinador (se agrega en el servidor por volumen).
+app.post('/api/comparativa', wrap(async (req, res) => {
+  const b = req.body || {};
+  const ints = (a) => (Array.isArray(a) ? a.map(Number).filter(Number.isFinite) : []);
+  const anios = ints(b.anios).slice(0, 6);
+  if (!anios.length) return res.status(400).json({ error: 'Faltan los años.' });
+  const where = ['anio = ANY($1::int[])'];
+  const params = [anios];
+  const add = (sql, v) => { params.push(v); where.push(sql.replace('$?', '$' + params.length)); };
+  if (ints(b.meses).length) add('mes = ANY($?::smallint[])', ints(b.meses));
+  if (ints(b.semanas).length) add('semana = ANY($?::smallint[])', ints(b.semanas));
+  if (ints(b.dias).length) add('dia = ANY($?::smallint[])', ints(b.dias));
+  if (b.cob === 'si') where.push('cobertura = 1'); else if (b.cob === 'no') where.push('cobertura = 0'); else if (b.cob === 'sd') where.push('cobertura IS NULL');
+  if (Array.isArray(b.marcas)) add('marca = ANY($?::text[])', b.marcas.map((m) => clean(m, 120)));
+  if (b.cadena) add('cadena = $?', clean(b.cadena));
+  const dims = b.por === 'coordinador' ? ['coordinador'] : ['cadena', 'tienda'];
+  const coordCol = b.por === 'coordinador' ? '' : `, (array_agg(coordinador ORDER BY mes DESC, dia DESC) FILTER (WHERE coordinador <> ''))[1] AS coordinador`;
+  const r = await pool.query(
+    `SELECT ${dims.join(', ')}${coordCol}, anio, semana, sum(venta)::float8 AS v, sum(unidades)::float8 AS u
+     FROM ${SCHEMA}.ventas_tienda_dia WHERE ${where.join(' AND ')}
+     GROUP BY ${dims.join(', ')}, anio, semana`, params);
+  const cnt = await pool.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.ventas_tienda_dia WHERE anio = ANY($1::int[])`, [anios]);
+  res.json({ rows: r.rows, disponible: cnt.rows[0].n > 0 });
+}));
+
+app.get('/api/coordinadores', wrap(async (req, res) => {
+  const r = await pool.query(`SELECT coordinador, count(DISTINCT tienda)::int AS tiendas, round(sum(venta))::float8 AS venta FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador <> '' GROUP BY coordinador ORDER BY coordinador`);
+  const rep = await pool.query(`SELECT original, nuevo FROM ${SCHEMA}.reemplazos WHERE tipo = 'coordinador' ORDER BY original`);
+  res.json({ coordinadores: r.rows, reemplazos: rep.rows });
+}));
+
+// Reemplazar el nombre de un coordinador: se aplica a lo ya guardado y a las próximas cargas.
+app.post('/api/reemplazos', wrap(auth), wrap(async (req, res) => {
+  const original = clean(req.body?.original, 120), nuevo = clean(req.body?.nuevo, 120);
+  if (!original || !nuevo) return res.status(400).json({ error: 'Escribe el nombre actual y el nuevo.' });
+  if (original === nuevo) return res.status(400).json({ error: 'El nombre nuevo es igual al actual.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`INSERT INTO ${SCHEMA}.reemplazos (tipo, original, nuevo) VALUES ('coordinador', $1, $2) ON CONFLICT (tipo, original) DO UPDATE SET nuevo = EXCLUDED.nuevo`, [original, nuevo]);
+    // Si algún reemplazo apuntaba al nombre original, ahora apunta al nuevo (evita cadenas A→B→C).
+    await client.query(`UPDATE ${SCHEMA}.reemplazos SET nuevo = $2 WHERE tipo = 'coordinador' AND nuevo = $1`, [original, nuevo]);
+    const u = await client.query(`UPDATE ${SCHEMA}.ventas_tienda_dia SET coordinador = $2 WHERE coordinador = $1`, [original, nuevo]);
+    await client.query('COMMIT');
+    res.json({ ok: true, filas: u.rowCount });
+  } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+}));
+app.delete('/api/reemplazos/:original', wrap(auth), wrap(async (req, res) => {
+  await pool.query(`DELETE FROM ${SCHEMA}.reemplazos WHERE tipo = 'coordinador' AND original = $1`, [clean(req.params.original, 120)]);
+  res.json({ ok: true });
+}));
+
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const dni = String(req.body?.dni || '').trim(), password = String(req.body?.password || '');
   const r = await pool.query(`SELECT dni, nombre, hash, es_admin FROM ${SCHEMA}.usuarios WHERE dni = $1`, [dni]);
@@ -202,35 +292,44 @@ app.get('/api/me', wrap(auth), (req, res) => res.json({ user: { dni: req.user.dn
 
 // Guardar archivos: reemplaza por completo los años que vienen en la carga.
 app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
-  const { archivos, anios, rows, dias } = req.body || {};
+  const { archivos, anios, rows, dias, tdias } = req.body || {};
   if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'No llegaron datos para guardar.' });
   if (!Array.isArray(anios) || !anios.length) return res.status(400).json({ error: 'No llegaron los años de la carga.' });
   const yearSet = new Set(anios.map((a) => +a.anio));
-  const clean = [];
+  const cleanRows = [];
   for (const r of rows) {
     if (!Array.isArray(r) || r.length < 8) return res.status(400).json({ error: 'Formato de datos no válido.' });
     const [cad, tie, mar, y, m, w, v, u, cob] = r;
     if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !isFinite(v)) return res.status(400).json({ error: `Fila no válida: ${JSON.stringify(r).slice(0, 120)}` });
-    clean.push([String(cad).slice(0, 200), String(tie).slice(0, 200), String(mar ?? '').slice(0, 120), +y, +m, +w, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100, cob === 1 || cob === 0 ? cob : null]);
+    cleanRows.push([clean(cad), clean(tie), clean(mar, 120), +y, +m, +w, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100, cob === 1 || cob === 0 ? cob : null]);
   }
   const cleanDias = [];
   for (const r of Array.isArray(dias) ? dias : []) {
     if (!Array.isArray(r) || r.length < 9) return res.status(400).json({ error: 'Formato de datos diarios no válido.' });
     const [cad, mar, cob, y, m, w, d, v, u] = r;
     if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !(d >= 0 && d <= 31) || !isFinite(v)) return res.status(400).json({ error: `Fila diaria no válida: ${JSON.stringify(r).slice(0, 120)}` });
-    cleanDias.push([String(cad).slice(0, 200), String(mar ?? '').slice(0, 120), cob === 1 || cob === 0 ? cob : null, +y, +m, +w, +d, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
+    cleanDias.push([clean(cad), clean(mar, 120), cob === 1 || cob === 0 ? cob : null, +y, +m, +w, +d, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
   }
-  const total = clean.reduce((t, r) => t + r[6], 0);
+  const cmap = await coordMap();
+  const cleanTD = [];
+  for (const r of Array.isArray(tdias) ? tdias : []) {
+    if (!Array.isArray(r) || r.length < 11) return res.status(400).json({ error: 'Formato de datos por tienda no válido.' });
+    const [cad, tie, coord, mar, cob, y, m, w, d, v, u] = r;
+    if (!yearSet.has(+y) || !(m >= 1 && m <= 12) || !(w >= 0 && w <= 54) || !(d >= 0 && d <= 31) || !isFinite(v)) return res.status(400).json({ error: `Fila por tienda no válida: ${JSON.stringify(r).slice(0, 120)}` });
+    const c = clean(coord, 120);
+    cleanTD.push([clean(cad), clean(tie), cmap.get(c) || c, clean(mar, 120), cob === 1 || cob === 0 ? cob : null, +y, +m, +w, +d, Math.round(v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
+  }
+  const total = cleanRows.reduce((t, r) => t + r[6], 0);
   const years = [...yearSet].sort();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const c = await client.query(`INSERT INTO ${SCHEMA}.cargas (usuario_dni, usuario, archivos, anios, filas, total) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [req.user.dni, req.user.nombre, (archivos || []).map(String).slice(0, 50), years, clean.length, total]);
+      [req.user.dni, req.user.nombre, (archivos || []).map(String).slice(0, 50), years, cleanRows.length, total]);
     const cargaId = c.rows[0].id;
     await client.query(`DELETE FROM ${SCHEMA}.ventas WHERE anio = ANY($1::int[])`, [years]);
-    for (let i = 0; i < clean.length; i += 5000) {
-      const chunk = clean.slice(i, i + 5000);
+    for (let i = 0; i < cleanRows.length; i += 5000) {
+      const chunk = cleanRows.slice(i, i + 5000);
       const col = (k) => chunk.map((r) => r[k]);
       await client.query(
         `INSERT INTO ${SCHEMA}.ventas (cadena, tienda, marca, anio, mes, semana, venta, unidades, cobertura)
@@ -246,6 +345,15 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
          SELECT * FROM unnest($1::text[], $2::text[], $3::smallint[], $4::int[], $5::smallint[], $6::smallint[], $7::smallint[], $8::numeric[], $9::numeric[])`,
         [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7), col(8)]);
     }
+    await client.query(`DELETE FROM ${SCHEMA}.ventas_tienda_dia WHERE anio = ANY($1::int[])`, [years]);
+    for (let i = 0; i < cleanTD.length; i += 5000) {
+      const chunk = cleanTD.slice(i, i + 5000);
+      const col = (k) => chunk.map((r) => r[k]);
+      await client.query(
+        `INSERT INTO ${SCHEMA}.ventas_tienda_dia (cadena, tienda, coordinador, marca, cobertura, anio, mes, semana, dia, venta, unidades)
+         SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::smallint[], $6::int[], $7::smallint[], $8::smallint[], $9::smallint[], $10::numeric[], $11::numeric[])`,
+        [col(0), col(1), col(2), col(3), col(4), col(5), col(6), col(7), col(8), col(9), col(10)]);
+    }
     for (const a of anios) {
       await client.query(
         `INSERT INTO ${SCHEMA}.anios (anio, max_mes, max_dia, carga_id, actualizado) VALUES ($1, $2, $3, $4, now())
@@ -253,7 +361,7 @@ app.post('/api/cargas', wrap(auth), wrap(async (req, res) => {
         [+a.anio, +a.max_mes, a.max_dia == null ? null : +a.max_dia, cargaId]);
     }
     await client.query('COMMIT');
-    res.json({ ok: true, carga: cargaId, anios: years, filas: clean.length, dias: cleanDias.length, total });
+    res.json({ ok: true, carga: cargaId, anios: years, filas: cleanRows.length, dias: cleanDias.length, tiendasDia: cleanTD.length, total });
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -269,6 +377,7 @@ app.delete('/api/anios/:anio', wrap(auth), wrap(async (req, res) => {
     await client.query('BEGIN');
     const d = await client.query(`DELETE FROM ${SCHEMA}.ventas WHERE anio = $1`, [y]);
     await client.query(`DELETE FROM ${SCHEMA}.ventas_dia WHERE anio = $1`, [y]);
+    await client.query(`DELETE FROM ${SCHEMA}.ventas_tienda_dia WHERE anio = $1`, [y]);
     await client.query(`DELETE FROM ${SCHEMA}.anios WHERE anio = $1`, [y]);
     await client.query('COMMIT');
     res.json({ ok: true, filas: d.rowCount });

@@ -179,6 +179,7 @@
     { key: 'marca', label: 'Marca' },
     { key: 'unidades', label: 'Unidades' },
     { key: 'cobertura', label: 'Cobertura' },
+    { key: 'coordinador', label: 'Coordinador' },
   ];
 
   const RULES = {
@@ -190,6 +191,7 @@
     cadena: { pats: [/^(cadena|cadena comercial|retail|cliente|razon social|chain)$/, /\bcadena|\bretail\b|\bcliente\b|\bchain\b|\bcanal\b/], not: /cod|id\b|ruc/ },
     tienda: { pats: [/^(tienda|pdv|punto de venta|local|sucursal|store|nombre tienda|nombre pdv|nombre local|desc tienda|descripcion tienda|tienda nombre)$/, /\b(tienda|pdv|punto de venta|local|sucursal|store)\b/], not: /\bcod|codigo|\bid\b|cadena/ },
     marca: { pats: [/^(marca|brand)$/, /\bmarca\b|\bbrand\b/], not: /cod/ },
+    coordinador: { pats: [/^(coordinador|coordinadora|coord|supervisor|supervisora|coordinador comercial|coordinador zonal|nombre coordinador)$/, /coordin|supervis/], not: /cod|dni|telef|cel|correo|mail/ },
     cobertura: { pats: [/^(cobertura|coberturado|coberturada|cobertura pdv|estado cobertura|tipo cobertura|cobertura tienda|cob)$/, /cobert/], not: /fecha|venta|monto/ },
     unidades: { pats: [/^(unidades|cantidad|und|qty|piezas)$/, /\bcant|\bunid|\bund\b|\bqty\b|\bpiezas\b/], not: /precio|venta s/ },
   };
@@ -228,7 +230,7 @@
     const used = new Set();
     const map = {};
     const hn = headers.map(norm);
-    for (const role of ['venta', 'fecha', 'anio', 'semana', 'mes', 'cobertura', 'cadena', 'tienda', 'marca', 'unidades']) {
+    for (const role of ['venta', 'fecha', 'anio', 'semana', 'mes', 'cobertura', 'coordinador', 'cadena', 'tienda', 'marca', 'unidades']) {
       const r = RULES[role];
       let found = -1;
       for (const p of r.pats) {
@@ -363,9 +365,13 @@
     const unknownLabels = new Set();
     f.error = null;
 
-    const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).trim(); return s || d; };
-    const dagg = new Map();
-    const add = (cad, tie, mar, y, m, w, v, u, d = null, cob = null) => {
+    // Nombres unificados en mayúsculas y sin espacios dobles ("Tottus" y "TOTTUS" son la misma cadena).
+    const label = (v, d) => { const s = v == null ? '' : v instanceof Date ? v.toLocaleDateString('es-PE') : String(v).replace(/\s+/g, ' ').trim().toUpperCase(); return s || d; };
+    const dagg = new Map(), tdagg = new Map();
+    const add = (cad, tie, mar, y, m, w, v, u, d = null, cob = null, coord = '') => {
+      const tk = cad + '\u0001' + tie + '\u0001' + coord + '\u0001' + mar + '\u0001' + (cob == null ? '' : cob) + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0) + '\u0001' + (d || 0);
+      const tc = tdagg.get(tk);
+      if (tc) { tc.v += v; tc.u += u; } else tdagg.set(tk, { v, u });
       const dk = cad + '\u0001' + mar + '\u0001' + (cob == null ? '' : cob) + '\u0001' + y + '\u0001' + m + '\u0001' + (w || 0) + '\u0001' + (d || 0);
       const dc = dagg.get(dk);
       if (dc) { dc.v += v; dc.u += u; } else dagg.set(dk, { v, u });
@@ -409,7 +415,7 @@
           for (const c of wide) {
             const v = parseAmount(r[c.i]);
             if (v == null || v === 0) continue;
-            add(cad, tie, mar, c.y, c.m, 0, v, 0, null, cobOf(r));
+            add(cad, tie, mar, c.y, c.m, 0, v, 0, null, cobOf(r), label(val(r, 'coordinador'), ''));
           }
           continue;
         }
@@ -435,7 +441,7 @@
         const u = mp.unidades != null ? parseAmount(val(r, 'unidades')) || 0 : 0;
         let w = ym.d ? weekOf(ym.y, ym.m, ym.d) : 0;
         if (mp.semana != null) w = parseWeek(val(r, 'semana')) || w;
-        add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d, cobOf(r));
+        add(cad, tie, mar, ym.y, ym.m, w, v, u, ym.d, cobOf(r), label(val(r, 'coordinador'), ''));
       }
     }
     if (!used) f.error = partErrors[0] || 'No pude leer ninguna fila con venta y fecha. Revisa la fila de encabezados y las columnas elegidas.';
@@ -453,7 +459,8 @@
     const hasCob = f.parts.some((p) => p.mapping.cobertura != null);
     if (used && !hasCob) warnings.push('⚠ No encontré la columna de cobertura: estos datos no aparecerán cuando el reporte muestre "Solo coberturados". Elígela en la lista "Cobertura".');
     if (unknownLabels.size) warnings.push(`Valores de cobertura que no reconocí (cuentan como "sin dato"): ${[...unknownLabels].join(', ')}.`);
-    Object.assign(f, { agg, dagg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide, hasCob, covTotal, uncovTotal, unkTotal });
+    if (used && !f.parts.some((p) => p.mapping.coordinador != null)) warnings.push('No encontré la columna de coordinador: la comparativa por coordinador saldrá vacía para este archivo. Elígela en la lista "Coordinador".');
+    Object.assign(f, { agg, dagg, tdagg, warnings, used, years: [...years].sort(), total, maxDate, maxByYear, monthsByYear, wide: anyWide, hasCob, covTotal, uncovTotal, unkTotal });
   }
 
   function monthsText(set) {
@@ -492,18 +499,33 @@
       ? `<span class="who">👤 ${esc(u.nombre)}</span>${u.admin ? '<button class="btn btn-ghost" id="btnUsers">Usuarios</button>' : ''}<button class="btn btn-ghost" id="btnPwd">Contraseña</button><button class="btn btn-ghost" id="btnLogout">Salir</button>`
       : `<button class="btn btn-primary" data-open-login>Iniciar sesión</button>`;
     $('#uploadArea').hidden = !u;
+    renderCoord();
     $('#loginHint').hidden = !!u;
     renderBase();
   }
 
-  let serverData = null;
+  let serverData = null, coordData = null;
+
+  function renderCoord() {
+    const box = $('#coordBox');
+    if (!coordData) return;
+    box.hidden = !coordData.coordinadores.length && !coordData.reemplazos.length;
+    $('#tblCoord').innerHTML = `<thead><tr><th>Coordinador</th><th class="num">Tiendas</th><th class="num">Venta</th></tr></thead><tbody>${
+      coordData.coordinadores.map((c) => `<tr><td>${esc(c.coordinador)}</td><td class="num">${num(c.tiendas)}</td><td class="num">${money(c.venta)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Aún no hay coordinadores guardados: vuelve a subir los archivos.</td></tr>'}</tbody>`;
+    const logged = !!session.user;
+    $('#tblRepl').innerHTML = `<thead><tr><th>Nombre en el archivo</th><th>Se muestra como</th>${logged ? '<th></th>' : ''}</tr></thead><tbody>${
+      coordData.reemplazos.map((r) => `<tr><td>${esc(r.original)}</td><td><b>${esc(r.nuevo)}</b></td>${logged ? `<td><button class="btn btn-danger" data-del-repl="${esc(r.original)}">Quitar</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="3" class="muted">Sin reemplazos.</td></tr>'}</tbody>`;
+    $('#formRepl').hidden = !logged;
+    $('#coordList').innerHTML = coordData.coordinadores.map((c) => `<option value="${esc(c.coordinador)}">`).join('');
+  }
   async function loadServer() {
     const st = $('#serverStatus');
     st.hidden = false; st.className = 'server-status';
     st.innerHTML = '<span class="spinner"></span> Cargando los datos de la base… (si el servidor estaba en reposo puede tardar hasta un minuto)';
     try {
       serverData = await api('/api/data');
-      cmp.data = null;
+      cmp.data = null; cmp.cache = null;
+      api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); }).catch(() => {});
       applyServerData(serverData);
       st.hidden = true;
     } catch (e) {
@@ -575,15 +597,15 @@
   // Archivos por guardar (aún no están en la base).
   function stagingPayload() {
     const ok = state.files.filter((f) => !f.error);
-    const agg = new Map(), dagg = new Map();
+    const agg = new Map(), dagg = new Map(), tdagg = new Map();
     const maxY = {};
     const merge = (dst, src) => { for (const [k, o] of src) { const c = dst.get(k); if (c) { c.v += o.v; c.u += o.u; } else dst.set(k, { v: o.v, u: o.u }); } };
     for (const f of ok) {
-      merge(agg, f.agg); merge(dagg, f.dagg || new Map());
+      merge(agg, f.agg); merge(dagg, f.dagg || new Map()); merge(tdagg, f.tdagg || new Map());
       for (const y in f.maxByYear) { const a = f.maxByYear[y]; if (!maxY[y] || a.stamp > maxY[y].stamp) maxY[y] = a; }
     }
     const byYear = {};
-    const Y = (y) => byYear[y] || (byYear[y] = { rows: [], dias: [] });
+    const Y = (y) => byYear[y] || (byYear[y] = { rows: [], dias: [], tdias: [] });
     let total = 0, nRows = 0;
     for (const [k, o] of agg) {
       const [c, t, m, y, mo, w, cob] = k.split('\u0001');
@@ -593,6 +615,10 @@
     for (const [k, o] of dagg) {
       const [c, m, cob, y, mo, w, d] = k.split('\u0001');
       Y(y).dias.push([c, m, cob === '' ? null : +cob, +y, +mo, +w, +d, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100]);
+    }
+    for (const [k, o] of tdagg) {
+      const [c, t, co, m, cob, y, mo, w, d] = k.split('\u0001');
+      Y(y).tdias.push([c, t, co, m, cob === '' ? null : +cob, +y, +mo, +w, +d, Math.round(o.v * 100) / 100, Math.round(o.u * 100) / 100]);
     }
     const anios = Object.keys(maxY).map((y) => ({ anio: +y, max_mes: maxY[y].m, max_dia: maxY[y].d })).sort((a, b) => a.anio - b.anio);
     return { archivos: ok.map((f) => f.name), anios, byYear, total, rows: { length: nRows } };
@@ -625,8 +651,8 @@
       // Un envío por año: cada año se reemplaza por completo y la carga no se vuelve demasiado pesada.
       for (const a of P.anios) {
         btn.textContent = `Guardando ${a.anio}…`;
-        const Y = P.byYear[a.anio] || { rows: [], dias: [] };
-        const r = await api('/api/cargas', { method: 'POST', body: { archivos: P.archivos, anios: [a], rows: Y.rows, dias: Y.dias } });
+        const Y = P.byYear[a.anio] || { rows: [], dias: [], tdias: [] };
+        const r = await api('/api/cargas', { method: 'POST', body: { archivos: P.archivos, anios: [a], rows: Y.rows, dias: Y.dias, tdias: Y.tdias } });
         filas += r.filas;
       }
       toast(`Guardado: años ${P.anios.map((a) => a.anio).join(', ')} · ${num(filas)} registros.`);
@@ -1098,34 +1124,70 @@
 
     const inD = (r) => !cmp.days.size || cmp.days.has(r.d);
     const sel = base.filter((r) => inM(r) && inW(r) && inD(r));
+    {
+      const tot = { a: 0, b: 0, pa: 0, pb: 0 };
+      for (const r of sel) { if (r.tipo === 'sinmarca') continue; if (r.y === yA) { tot.a += r.v; if (r.tipo === 'paraiso') tot.pa += r.v; } else { tot.b += r.v; if (r.tipo === 'paraiso') tot.pb += r.v; } }
+      cmp.shareP = { a: tot.a ? tot.pa / tot.a : null, b: tot.b ? tot.pb / tot.b : null };
+    }
     const by = $('#cmpBy').value;
-    const keyOf = (r) => (by === 'marca' ? r.marca || '(Sin marca)' : by === 'tipo' ? TIPO_LABEL[r.tipo] : r.cadena);
-    const groups = new Map();
-    for (const r of sel) {
-      const k = keyOf(r);
-      const g = groups.get(k) || { k, vA: 0, vB: 0, uA: 0, uB: 0 };
+    const LABELS = { cadena: ['Cadena'], marca: ['Marca'], tipo: ['Tipo de venta'], tienda: ['Cadena', 'Tienda', 'Coordinador'], coordinador: ['Coordinador'] };
+
+    // Filas de trabajo {cols, y, w, v, u}: cadena/marca/grupo salen del detalle diario ya cargado;
+    // tienda y coordinador se piden al servidor (son muchas filas para traerlas todas).
+    let work;
+    if (by === 'tienda' || by === 'coordinador') {
+      const marcas = F.tipo || F.brand ? [...new Set(data.map((r) => r.marca))].filter((m) => (!F.tipo || tipoDe(m) === F.tipo) && (!F.brand || m === F.brand)) : null;
+      const body = { anios: [yA, yB], meses: [...cmp.months], semanas: [...cmp.weeks], dias: [...cmp.days], cob: state.hasCob ? F.cob : 'all', marcas, cadena: F.chain || '', por: by };
+      const key = JSON.stringify(body);
+      const token = (cmp.token = (cmp.token || 0) + 1);
+      let resp = cmp.cache?.key === key ? cmp.cache.resp : null;
+      if (!resp) {
+        $('#cmpStatus').hidden = false; $('#cmpStatus').textContent = `Calculando la comparativa por ${by}…`;
+        try { resp = await api('/api/comparativa', { method: 'POST', body }); } catch (e) { $('#cmpStatus').textContent = e.message; return; }
+        if (token !== cmp.token) return; // llegó una consulta más nueva
+        cmp.cache = { key, resp };
+        $('#cmpStatus').hidden = true;
+      }
+      $('#cmpNoStore').hidden = resp.disponible;
+      if (by === 'tienda') {
+        const coordOf = new Map();
+        for (const r of resp.rows) { const k = r.cadena + '|' + r.tienda; if (r.coordinador && (!coordOf.has(k) || r.anio === yB)) coordOf.set(k, r.coordinador); }
+        work = resp.rows.map((r) => ({ cols: [r.cadena, r.tienda, coordOf.get(r.cadena + '|' + r.tienda) || '—'], y: r.anio, w: r.semana, v: r.v, u: r.u }));
+      } else {
+        work = resp.rows.map((r) => ({ cols: [r.coordinador || '(Sin coordinador)'], y: r.anio, w: r.semana, v: r.v, u: r.u }));
+      }
+    } else {
+      $('#cmpNoStore').hidden = true;
+      const keyOf = (r) => (by === 'marca' ? r.marca || '(Sin marca)' : by === 'tipo' ? TIPO_LABEL[r.tipo] : r.cadena);
+      work = sel.map((r) => ({ cols: [keyOf(r)], y: r.y, w: r.w, v: r.v, u: r.u }));
+    }
+
+    const groups = new Map(), wk = new Map();
+    for (const r of work) {
+      const k = r.cols.join('\u0001');
+      const g = groups.get(k) || { cols: r.cols, vA: 0, vB: 0, uA: 0, uB: 0 };
       if (r.y === yA) { g.vA += r.v; g.uA += r.u; } else { g.vB += r.v; g.uB += r.u; }
       groups.set(k, g);
+      if (r.w > 0) {
+        const gw = wk.get(k) || { cols: r.cols, w: {} };
+        const c = gw.w[r.w] || (gw.w[r.w] = { vA: 0, vB: 0, uA: 0, uB: 0 });
+        if (r.y === yA) { c.vA += r.v; c.uA += r.u; } else { c.vB += r.v; c.uB += r.u; }
+        wk.set(k, gw);
+      }
     }
-    const list = [...groups.values()].sort((a, b) => a.k.localeCompare(b.k, 'es'));
-    cmp.last = { yA, yB, list, by };
-    const hasUnits = sel.some((r) => r.u);
+    const byCols = (a, b) => a.cols.join(' ').localeCompare(b.cols.join(' '), 'es');
+    const list = [...groups.values()].sort(byCols);
+    cmp.last = { yA, yB, list, by, labels: LABELS[by] };
+    const hasUnits = work.some((r) => r.u);
     renderTable('tblCmpSoles', cmpAOA('v'));
     $('#cmpUndCard').hidden = !hasUnits;
     if (hasUnits) renderTable('tblCmpUnd', cmpAOA('u'));
+    $('#cmpByTitle').textContent = LABELS[by][by === 'tienda' ? 1 : 0];
 
     // Detalle por semana: columnas Sem-N × año, como la tabla dinámica de Excel.
-    const weeks = (cmp.weeks.size ? [...cmp.weeks] : [...new Set(sel.filter((r) => r.w > 0).map((r) => r.w))]).sort((a, b) => a - b);
-    const wk = new Map();
-    for (const r of sel) {
-      if (!(r.w > 0)) continue;
-      const k = keyOf(r);
-      const g = wk.get(k) || { k, w: {} };
-      const c = g.w[r.w] || (g.w[r.w] = { vA: 0, vB: 0, uA: 0, uB: 0 });
-      if (r.y === yA) { c.vA += r.v; c.uA += r.u; } else { c.vB += r.v; c.uB += r.u; }
-      wk.set(k, g);
-    }
-    cmp.wk = { weeks, list: [...wk.values()].sort((a, b) => a.k.localeCompare(b.k, 'es')), yA, yB, by };
+    const weeks = (cmp.weeks.size ? [...cmp.weeks] : [...new Set(work.filter((r) => r.w > 0).map((r) => r.w))]).sort((a, b) => a - b);
+    cmp.wk = { weeks, list: [...wk.values()].sort(byCols), yA, yB, by, labels: LABELS[by] };
+    renderAnalysis(hasUnits);
     $('#cmpWeekCard').hidden = !weeks.length;
     $('#cmpWeekUndCard').hidden = !weeks.length || !hasUnits;
     if (weeks.length) {
@@ -1148,31 +1210,32 @@
   }
 
   function weekAOA(field) {
-    const { weeks, list, yA, yB, by } = cmp.wk;
+    const { weeks, list, yA, yB } = cmp.wk;
     const unit = field === 'v' ? 'Soles' : 'Und';
     const A = field === 'v' ? 'vA' : 'uA', B = field === 'v' ? 'vB' : 'uB';
     const t = field === 'v' ? '$' : 'n';
-    const head = [by === 'marca' ? 'Marca' : by === 'tipo' ? 'Tipo de venta' : 'Cadena'];
-    const types = ['t'];
+    const head = [...cmp.wk.labels];
+    const types = head.map(() => 't');
     for (const w of weeks) { head.push(`Sem-${w} ${yA} ${unit}`, `Sem-${w} ${yB} ${unit}`, `Sem-${w} Var %`); types.push(t, t, '%'); }
     head.push(`Total ${yA} ${unit}`, `Total ${yB} ${unit}`, 'Total Var %'); types.push(t, t, '%');
-    const rowOf = (label, cells) => {
-      const r = [label]; let ta = 0, tb = 0;
+    const nl = cmp.wk.labels.length;
+    const rowOf = (cols, cells) => {
+      const r = [...cols]; let ta = 0, tb = 0;
       for (const w of weeks) { const c = cells(w); r.push(c.a, c.b, varPct(c.b, c.a)); ta += c.a; tb += c.b; }
       r.push(ta, tb, varPct(tb, ta));
       return r;
     };
-    const rows = list.map((g) => rowOf(g.k, (w) => ({ a: g.w[w]?.[A] || 0, b: g.w[w]?.[B] || 0 }))).filter((r) => r.slice(1).some((v, i) => types[i + 1] !== '%' && v));
-    const foot = [rowOf('Total general', (w) => ({ a: list.reduce((s, g) => s + (g.w[w]?.[A] || 0), 0), b: list.reduce((s, g) => s + (g.w[w]?.[B] || 0), 0) }))];
-    return { head, rows, foot, types, weeks, yA, yB, unit };
+    const rows = list.map((g) => rowOf(g.cols, (w) => ({ a: g.w[w]?.[A] || 0, b: g.w[w]?.[B] || 0 }))).filter((r) => r.slice(nl).some((v, i) => types[i + nl] !== '%' && v));
+    const foot = [rowOf(['Total general', ...Array(nl - 1).fill('')], (w) => ({ a: list.reduce((s, g) => s + (g.w[w]?.[A] || 0), 0), b: list.reduce((s, g) => s + (g.w[w]?.[B] || 0), 0) }))];
+    return { head, rows, foot, types, weeks, yA, yB, unit, nl };
   }
 
   function renderWeekTable(id, field) {
     const T = weekAOA(field);
     const groups = [...T.weeks.map((w) => `Sem-${w}`), 'Total'];
-    const th1 = `<tr><th rowspan="2">${esc(T.head[0])}</th>${groups.map((g) => `<th colspan="3" class="grp">${g}</th>`).join('')}</tr>`;
+    const th1 = `<tr>${T.head.slice(0, T.nl).map((h) => `<th rowspan="2">${esc(h)}</th>`).join('')}${groups.map((g) => `<th colspan="3" class="grp">${g}</th>`).join('')}</tr>`;
     const th2 = `<tr>${groups.map(() => `<th class="num">${T.yA}<br>${T.unit}</th><th class="num">${T.yB}<br>${T.unit}</th><th class="num">Var%</th>`).join('')}</tr>`;
-    const row = (r) => `<tr>${r.map((v, i) => (i === 0 ? `<td>${esc(v)}</td>` : `<td class="num ${T.types[i] === '%' ? dirCls(v) : ''} ${(i - 1) % 3 === 0 ? 'sep' : ''}">${cell(v, T.types[i])}</td>`)).join('')}</tr>`;
+    const row = (r) => `<tr>${r.map((v, i) => (i < T.nl ? `<td>${esc(v)}</td>` : `<td class="num ${T.types[i] === '%' ? dirCls(v) : ''} ${(i - T.nl) % 3 === 0 ? 'sep' : ''}">${cell(v, T.types[i])}</td>`)).join('')}</tr>`;
     $('#' + id).innerHTML = `<thead>${th1}${th2}</thead><tbody>${T.rows.map(row).join('')}</tbody><tfoot>${T.foot.map(row).join('')}</tfoot>`;
   }
 
@@ -1231,14 +1294,69 @@
   }
 
   function cmpAOA(field) {
-    const { yA, yB, list, by } = cmp.last;
+    const { yA, yB, list, labels } = cmp.last;
     const unit = field === 'v' ? 'Soles' : 'Und';
     const A = field === 'v' ? 'vA' : 'uA', B = field === 'v' ? 'vB' : 'uB';
-    const head = [by === 'marca' ? 'Marca' : by === 'tipo' ? 'Tipo de venta' : 'Cadena', `${yA} ${unit}`, `${yB} ${unit}`, 'Var S/'.replace('S/', field === 'v' ? 'S/' : 'Und'), 'Var %'];
     const t = field === 'v' ? '$' : 'n';
-    const rows = list.filter((g) => g[A] || g[B]).map((g) => [g.k, g[A], g[B], g[B] - g[A], varPct(g[B], g[A])]);
-    const sa = rows.reduce((s, r) => s + r[1], 0), sb = rows.reduce((s, r) => s + r[2], 0);
-    return { head, rows, foot: [['Total general', sa, sb, sb - sa, varPct(sb, sa)]], types: ['t', t, t, t, '%'], varCols: [3, 4] };
+    const nl = labels.length;
+    const head = [...labels, `${yA} ${unit}`, `${yB} ${unit}`, field === 'v' ? 'Var S/' : 'Var Und', 'Var %'];
+    const rows = list.filter((g) => g[A] || g[B]).map((g) => [...g.cols, g[A], g[B], g[B] - g[A], varPct(g[B], g[A])]);
+    const sa = rows.reduce((s, r) => s + r[nl], 0), sb = rows.reduce((s, r) => s + r[nl + 1], 0);
+    return { head, rows, foot: [['Total general', ...Array(nl - 1).fill(''), sa, sb, sb - sa, varPct(sb, sa)]], types: [...labels.map(() => 't'), t, t, t, '%'], varCols: [nl + 2, nl + 3] };
+  }
+
+  // ---------------------------------------------------------------- análisis del Vs (texto automático)
+  function renderAnalysis(hasUnits) {
+    const { yA, yB, list, by, labels } = cmp.last;
+    const name = (g) => (by === 'tienda' ? `${g.cols[1]} (${g.cols[0]})` : g.cols[0]);
+    const what = { cadena: 'cadenas', marca: 'marcas', tipo: 'grupos', tienda: 'tiendas', coordinador: 'coordinadores' }[by];
+    const A = list.reduce((s, g) => s + g.vA, 0), B = list.reduce((s, g) => s + g.vB, 0);
+    const uA = list.reduce((s, g) => s + g.uA, 0), uB = list.reduce((s, g) => s + g.uB, 0);
+    const out = [];
+    if (!A && !B) { $('#cmpAnalysis').innerHTML = '<li>No hay ventas para la selección actual.</li>'; cmp.analysis = []; return; }
+    const d = B - A, p = varPct(B, A);
+    const sign = (x) => (x > 0 ? 'crece' : x < 0 ? 'cae' : 'se mantiene');
+    out.push(`<b>Resultado general:</b> la venta ${sign(d)} ${p == null ? '' : `<span class="${dirCls(d)}">${pct(p)}</span>`} — de ${money(A)} en ${yA} a ${money(B)} en ${yB} (${signMoney(d)}).`);
+    if (hasUnits && (uA || uB)) {
+      const pu = varPct(uB, uA);
+      const tA = uA ? A / uA : null, tB = uB ? B / uB : null;
+      out.push(`<b>Unidades:</b> ${num(uA)} → ${num(uB)} (${pct(pu)}).` + (tA && tB ? ` El precio promedio por unidad pasa de ${money(tA)} a ${money(tB)} (${pct(varPct(tB, tA))}), así que ${Math.abs(varPct(tB, tA)) > Math.abs(pu ?? 0) ? 'la variación se explica más por precio/mix que por volumen' : 'la variación se explica más por volumen que por precio'}.` : ''));
+    }
+    const moved = list.map((g) => ({ g, d: g.vB - g.vA })).filter((x) => x.d);
+    const up = moved.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), down = moved.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+    const active = list.filter((g) => g.vA || g.vB).length;
+    const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    out.push(`<b>${active} ${what}</b> con venta: ${pl(up.length, 'crece', 'crecen')} y ${pl(down.length, 'cae', 'caen')}.`);
+    const share = (x) => {
+      if (!d) return '';
+      const r = Math.abs(x.d / d);
+      return r > 1 ? `: por sí solo mueve más que la variación neta total (${signMoney(d)}), que se compensa con lo que va en sentido contrario` : ` el ${fmtPct.format(r)} de la variación neta`;
+    };
+    const fmtList = (arr) => arr.slice(0, 3).map((x) => `${esc(name(x.g))} ${signMoney(x.d)}${x.g.vA ? ` (${pct(varPct(x.g.vB, x.g.vA))})` : ' (nueva)'}`).join('; ');
+    if (up.length) out.push(`<b>Lo que más empuja hacia arriba:</b> ${fmtList(up)}.` + (d > 0 ? ` ${esc(name(up[0].g))} explica${share(up[0])}.` : ''));
+    if (down.length) out.push(`<b>Lo que más resta:</b> ${fmtList(down)}.` + (d < 0 ? ` ${esc(name(down[0].g))} explica${share(down[0])}.` : ''));
+    if (by === 'tienda') {
+      const nuevas = list.filter((g) => !g.vA && g.vB).length, sinVenta = list.filter((g) => g.vA && !g.vB).length;
+      if (nuevas || sinVenta) out.push(`<b>Tiendas:</b> ${nuevas} con venta solo en ${yB} y ${sinVenta} que vendieron en ${yA} pero no en ${yB}.`);
+    }
+    if (list.length > 1 && B) {
+      const top = [...list].sort((a, b) => b.vB - a.vB)[0];
+      out.push(`<b>Mayor peso:</b> ${esc(name(top))} concentra el ${fmtPct.format(top.vB / B)} de la venta de ${yB}.`);
+    }
+    // Participación Paraíso en la misma selección (si se están viendo todas las marcas).
+    if (state.hasBrand && !lastF.tipo && !lastF.brand && cmp.shareP) {
+      const { a, b } = cmp.shareP;
+      if (a != null && b != null) out.push(`<b>Participación Paraíso:</b> ${fmtPct.format(a)} → ${fmtPct.format(b)} (<span class="${dirCls(b - a)}">${(b - a > 0 ? '+' : '') + ((b - a) * 100).toFixed(1)} pp</span>).`);
+    }
+    if (cmp.wk?.weeks.length > 1) {
+      const ws = cmp.wk.weeks.map((w) => { const a = cmp.wk.list.reduce((s, g) => s + (g.w[w]?.vA || 0), 0), b = cmp.wk.list.reduce((s, g) => s + (g.w[w]?.vB || 0), 0); return { w, p: varPct(b, a) }; }).filter((x) => x.p != null);
+      if (ws.length > 1) {
+        const best = ws.reduce((m, x) => (x.p > m.p ? x : m)), worst = ws.reduce((m, x) => (x.p < m.p ? x : m));
+        out.push(`<b>Semanas:</b> la mejor fue Sem-${best.w} (${pct(best.p)}) y la más floja Sem-${worst.w} (${pct(worst.p)}).`);
+      }
+    }
+    cmp.analysis = out.map((h) => h.replace(/<[^>]+>/g, ''));
+    $('#cmpAnalysis').innerHTML = out.map((h) => `<li>${h}</li>`).join('');
   }
 
   // ---------------------------------------------------------------- copiar / exportar
@@ -1277,6 +1395,11 @@
     const corte = `Corte: ${C.y} · ${C.monthLabel}${C.hasW ? ' · Semana ' + C.w : ''} (último dato ${C.dateText})`;
     const filt = `${corte}${F.cob && F.cob !== 'all' ? ' · ' + COB_LABEL[F.cob] : ''}${F.tipo ? ' · ' + TIPO_LABEL[F.tipo] : ''}${F.chain ? ' · Cadena: ' + F.chain : ''}${F.brand ? ' · Marca: ' + F.brand : ''}`;
     const wb = XLSX.utils.book_new();
+    if (cmp.analysis?.length) {
+      const ws = XLSX.utils.aoa_to_sheet([['Análisis del Vs'], [$('#cmpNote').textContent], [], ...cmp.analysis.map((t) => [t])]);
+      ws['!cols'] = [{ wch: 140 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'Análisis');
+    }
     if (cmp.last && cmp.last.list.length) {
       XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('v'), 'Comparativa (soles) · ' + $('#cmpNote').textContent), 'Comparativa soles');
       if (cmp.last.list.some((g) => g.uA || g.uB)) XLSX.utils.book_append_sheet(wb, sheetFrom(cmpAOA('u'), 'Comparativa (unidades) · ' + $('#cmpNote').textContent), 'Comparativa und');
@@ -1308,6 +1431,21 @@
     $('#btnGoCompare').addEventListener('click', () => setView('anual'));
     $('#fileInput').addEventListener('change', (e) => { handleFiles(e.target.files).then(() => { e.target.value = ''; }); });
     $('#btnSave').addEventListener('click', saveToBase);
+    $('#formRepl').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        const r = await api('/api/reemplazos', { method: 'POST', body: { original: fd.get('original'), nuevo: fd.get('nuevo') } });
+        toast(`Reemplazo guardado (${num(r.filas)} registros actualizados).`); e.target.reset(); cmp.cache = null;
+        coordData = await api('/api/coordinadores'); renderCoord(); renderCmp();
+      } catch (x) { toast(x.message); }
+    });
+    $('#tblRepl').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-del-repl]'); if (!b) return;
+      if (!confirm(`¿Quitar el reemplazo de "${b.dataset.delRepl}"? Lo ya guardado conserva el nombre nuevo; el reemplazo deja de aplicarse en las próximas cargas.`)) return;
+      try { await api('/api/reemplazos/' + encodeURIComponent(b.dataset.delRepl), { method: 'DELETE' }); coordData = await api('/api/coordinadores'); renderCoord(); }
+      catch (x) { toast(x.message); }
+    });
     $('#btnReload').addEventListener('click', loadServer);
     $('#tblBase').addEventListener('click', (e) => { const b = e.target.closest('[data-del-year]'); if (b) deleteYear(+b.dataset.delYear); });
 

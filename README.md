@@ -37,6 +37,26 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 - Filtros: **desde el año**, **cadena** y **marca**.
 - **Descargar Excel**: un libro con las tablas de la Comparativa (soles, unidades y por semana) y de Por año. Cada tabla también tiene **Copiar tabla** para pegarla en Excel.
 
+## Comparativa por tienda y por coordinador
+
+- En la **Comparativa**, "Ver por" ofrece **Cadena, Tienda, Coordinador, Marca y Paraíso vs Competencia**. Tienda y coordinador se calculan en el servidor con el detalle diario por tienda (tabla `ventas_tienda_dia`), así que respetan los segmentadores de Mes, Semana y Día.
+- La app lee la columna **COORDINADOR** (o SUPERVISOR) de los archivos.
+- **Reemplazo de nombres de coordinador**: en **Datos → Coordinadores**. Cada reemplazo cambia el nombre en lo ya guardado y en las próximas cargas. Ya está cargado **DIEGO AMIAS → HERLES CORNELIO**.
+- Los nombres de cadena, tienda, marca y coordinador se guardan en **MAYÚSCULAS**, para que "Tottus" y "TOTTUS" cuenten como la misma cadena.
+
+## Análisis del Vs
+
+Arriba de las tablas de la Comparativa aparece un análisis escrito automáticamente para la selección actual:
+
+- resultado general en soles y %;
+- unidades y precio promedio, y si la variación se explica más por volumen o por precio/mix;
+- cuántos crecen y cuántos caen, y quiénes más suman y más restan;
+- quién concentra más venta;
+- la participación de Paraíso;
+- la mejor y la peor semana.
+
+El análisis se incluye en la hoja "Análisis" del Excel descargado.
+
 ## Cobertura
 
 Los archivos traen una columna de cobertura, por ejemplo **COBERTURA** o **COBERTURADO**. La app la detecta sola y entiende valores como SÍ/NO, COBERTURADO/NO COBERTURADO, 1/0 o X.

@@ -256,3 +256,12 @@ select, input[type="number"], input[type="search"] {
 .tbl.cmp.wk thead tr:nth-child(2) th { top: 31px; font-weight: 600; font-size: 12px; line-height: 1.2; }
 .tbl.cmp.wk td.sep { border-left: 2px solid #e3e6eb; }
 .cmp-main { min-width: 0; }
+
+/* ---------- Análisis y coordinadores ---------- */
+.analysis-card { border-left: 4px solid var(--accent); }
+.analysis { margin: 0; padding-left: 18px; display: grid; gap: 7px; font-size: 14px; line-height: 1.45; color: var(--text); }
+.analysis li::marker { color: var(--accent); }
+.coord-grid { gap: 14px; }
+.repl-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 10px; }
+.repl-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.repl-form input { font: inherit; font-size: 13.5px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; }
