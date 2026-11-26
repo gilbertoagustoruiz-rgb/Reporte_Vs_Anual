@@ -178,4 +178,18 @@ coordinadores y mes a mes. Se puede elegir el período (acumulado, mes o semana 
 - **Abrir borrador en Outlook** descarga un `.eml` con el formato y el Excel del análisis adjunto; Outlook lo abre listo para dar Enviar.
 - **Copiar y abrir mi correo** copia el correo con formato y abre uno nuevo con los destinatarios y el asunto (para Gmail u otro).
 - Los destinatarios (Para y CC) se guardan en la base (tabla `ajustes`), así que aparecen en cualquier equipo.
-- El correo sale desde la cuenta del administrador; la app no guarda claves de correo.
+- **Enviar correo** lo envía directamente desde la cuenta configurada en el servidor (queda en sus Enviados), con confirmación previa. Máximo 30 correos por hora.
+
+### Configurar la cuenta de envío (Gmail / Google Workspace)
+
+En Render, servicio de la API → *Environment*:
+
+| Variable | Valor |
+|---|---|
+| `SMTP_USER` | la cuenta que envía, p. ej. `gilberto.ruiz@belowgroup.com.pe` |
+| `SMTP_PASS` | una **contraseña de aplicación** de Google (16 letras), no la contraseña normal |
+
+Para crear la contraseña de aplicación: la cuenta debe tener la verificación en 2 pasos activa; luego en
+https://myaccount.google.com/apppasswords se crea una con el nombre "Reporte Vs Anual". Si esa página dice que no está
+disponible, el administrador de Google Workspace de la empresa debe permitir las contraseñas de aplicación.
+Opcionales: `SMTP_HOST` (por defecto `smtp.gmail.com`) y `SMTP_PORT` (por defecto `465`).

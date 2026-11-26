@@ -17,6 +17,7 @@ const compression = require('compression');
 const cors = require('cors');
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const nodemailer = require('nodemailer');
 
 const PORT = process.env.PORT || 3000;
 const SCHEMA = 'reporte_vs_anual';
@@ -562,9 +563,60 @@ app.get('/api/catalogo', wrap(auth), adminOnly, wrap(async (req, res) => {
 // Correo de análisis: destinatarios guardados (el correo se envía desde el correo del administrador).
 const EMAIL_RE = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
 const emails = (v) => String(v ?? '').split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+// Envío desde la cuenta de correo configurada en el servidor (Gmail / Google Workspace con contraseña de aplicación).
+const SMTP_USER = (process.env.SMTP_USER || '').trim(), SMTP_PASS = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+const smtpReady = () => !!(SMTP_USER && SMTP_PASS);
+let mailer = null;
+const getMailer = () => mailer || (mailer = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com', port: +(process.env.SMTP_PORT || 465), secure: +(process.env.SMTP_PORT || 465) === 465,
+  auth: { user: SMTP_USER, pass: SMTP_PASS },
+}));
+const sendLog = [];
+
 app.get('/api/correo', wrap(auth), adminOnly, wrap(async (req, res) => {
   const r = await pool.query(`SELECT valor FROM ${SCHEMA}.ajustes WHERE clave = 'correo'`);
-  res.json(r.rows[0]?.valor || { para: [], cc: [] });
+  res.json({ para: [], cc: [], ...(r.rows[0]?.valor || {}), envio: { listo: smtpReady(), desde: SMTP_USER || null } });
+}));
+
+app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
+  if (!smtpReady()) return res.status(503).json({ error: 'Falta configurar la cuenta de correo de envío en el servidor (SMTP_USER y SMTP_PASS en Render).' });
+  const now = Date.now();
+  while (sendLog.length && now - sendLog[0] > 3600e3) sendLog.shift();
+  if (sendLog.length >= 30) return res.status(429).json({ error: 'Se alcanzó el límite de 30 correos por hora. Intenta más tarde.' });
+  const b = req.body || {};
+  const para = emails(b.para), cc = emails(b.cc);
+  if (!para.length) return res.status(400).json({ error: 'Agrega al menos un destinatario en "Para".' });
+  const malos = [...para, ...cc].filter((e) => !EMAIL_RE.test(e) || e.length > 120);
+  if (malos.length) return res.status(400).json({ error: `Revisa estos correos: ${malos.slice(0, 3).join(', ')}.` });
+  if (para.length + cc.length > 60) return res.status(400).json({ error: 'Máximo 60 destinatarios.' });
+  const asunto = String(b.asunto || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 250) || 'Reporte Vs Anual';
+  const html = String(b.html || '');
+  if (!html.trim()) return res.status(400).json({ error: 'El correo está vacío.' });
+  if (html.length > 2e6) return res.status(400).json({ error: 'El correo es demasiado grande.' });
+  const attachments = [];
+  if (b.adjunto?.base64) {
+    const content = Buffer.from(String(b.adjunto.base64), 'base64');
+    if (content.length > 10e6) return res.status(400).json({ error: 'El adjunto es demasiado grande.' });
+    const filename = String(b.adjunto.nombre || 'Analisis_Vs_Anual.xlsx').replace(/[^\w.\-]+/g, '_').slice(0, 100);
+    attachments.push({ filename: filename.endsWith('.xlsx') ? filename : filename + '.xlsx', content, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  const nombre = String(req.user.nombre || '').replace(/["\r\n<>]/g, '').trim();
+  try {
+    const info = await getMailer().sendMail({
+      from: nombre ? { name: nombre, address: SMTP_USER } : SMTP_USER,
+      to: para, cc: cc.length ? cc : undefined, subject: asunto, html, attachments,
+      disableFileAccess: true, disableUrlAccess: true,
+    });
+    sendLog.push(now);
+    console.log(`Correo enviado por ${req.user.dni} a ${para.length + cc.length} destinatarios (${info.messageId}).`);
+    res.json({ ok: true, enviados: para.length + cc.length, desde: SMTP_USER });
+  } catch (e) {
+    console.error('Error al enviar correo:', e.code || '', e.message);
+    const auth535 = e.code === 'EAUTH' || /535|Username and Password not accepted|Invalid login/i.test(e.message);
+    res.status(502).json({ error: auth535
+      ? 'Google rechazó el usuario o la contraseña de aplicación. Revisa SMTP_USER y SMTP_PASS en Render.'
+      : `No se pudo enviar el correo: ${e.message}` });
+  }
 }));
 app.post('/api/correo', wrap(auth), adminOnly, wrap(async (req, res) => {
   const para = emails(req.body?.para), cc = emails(req.body?.cc);

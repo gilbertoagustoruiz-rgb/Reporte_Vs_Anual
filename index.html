@@ -455,11 +455,15 @@
           <label class="mail-check"><input type="checkbox" id="mlAttach" checked> Adjuntar el Excel del análisis</label>
           <p class="form-error" id="mlError" role="alert"></p>
           <div class="mail-actions">
-            <button type="button" class="btn btn-primary" id="mlEml">Abrir borrador en Outlook</button>
-            <button type="button" class="btn" id="mlCopyOpen">Copiar y abrir mi correo</button>
-            <button type="button" class="btn btn-ghost" id="mlCopy">Solo copiar el correo</button>
+            <button type="button" class="btn btn-primary" id="mlSend">Enviar correo</button>
+            <p class="mail-from" id="mlFrom">Revisando la cuenta de envío…</p>
+            <details class="mail-more">
+              <summary>Otras formas de enviarlo</summary>
+              <button type="button" class="btn" id="mlEml">Descargar borrador (.eml)</button>
+              <button type="button" class="btn" id="mlCopyOpen">Copiar y abrir mi correo</button>
+              <button type="button" class="btn btn-ghost" id="mlCopy">Solo copiar el correo</button>
+            </details>
           </div>
-          <p class="muted mail-help"><b>Outlook:</b> descarga un borrador con el formato y el Excel adjunto; al abrirlo solo revisas y das Enviar.<br><b>Gmail u otro:</b> copia el correo con formato y abre uno nuevo con los destinatarios; pega con Ctrl+V y adjunta el Excel si lo necesitas.</p>
         </aside>
 
         <section class="mail-preview" aria-label="Vista previa del correo">

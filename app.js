@@ -1338,7 +1338,11 @@
     wk.disabled = !state.cut.w; if (wk.disabled && $('#mlPer').value === 'week') $('#mlPer').value = 'ytd';
     if (!mail.loaded) {
       mail.loaded = true;
-      try { const r = await api('/api/correo'); $('#mlTo').value = r.para.join(', '); $('#mlCc').value = r.cc.join(', '); } catch { /* sin destinatarios guardados */ }
+      try {
+        const r = await api('/api/correo'); $('#mlTo').value = r.para.join(', '); $('#mlCc').value = r.cc.join(', ');
+        mail.envio = r.envio || { listo: false };
+      } catch { mail.envio = { listo: false }; }
+      renderMailFrom();
       const d = store.get('mailDraft', null);
       if (d) {
         if (d.per) $('#mlPer').value = d.per;
@@ -1360,6 +1364,7 @@
 
   function setMailState(msg) {
     const el = $('#mlState');
+    el.classList.remove('sent');
     el.classList.toggle('edited', !!(msg || mail.edited));
     el.textContent = msg || (mail.edited ? 'Editaste el texto. Tus cambios se guardan en este navegador hasta que lo envíes o lo vuelvas a generar.' : 'Puedes escribir directamente en el correo para ajustar el texto.');
   }
@@ -1536,6 +1541,37 @@
   }
 
   // ---- envío
+  function renderMailFrom() {
+    const e = mail.envio || {}, el = $('#mlFrom');
+    $('#mlSend').disabled = !e.listo;
+    el.className = 'mail-from ' + (e.listo ? 'ok' : 'warn');
+    el.innerHTML = e.listo
+      ? `Sale desde <b>${esc(e.desde)}</b> y queda en tus Enviados.`
+      : `Todavía no está conectada la cuenta de envío${e.desde ? ` (${esc(e.desde)})` : ''}. Falta poner la contraseña de aplicación de Google en Render (SMTP_PASS). Mientras tanto usa "Otras formas de enviarlo".`;
+  }
+
+  async function mailSend() {
+    if (!checkRecipients()) return;
+    const to = mailList($('#mlTo').value), cc = mailList($('#mlCc').value);
+    if (!to.length) { $('#mlError').textContent = 'Agrega al menos un destinatario en "Para".'; $('#mlTo').focus(); return; }
+    const subject = $('#mlSubject').value.trim() || 'Reporte Vs Anual';
+    const attach = $('#mlAttach').checked && mail.sheets.length;
+    const n = to.length + cc.length;
+    if (!confirm(`¿Enviar ahora el correo "${subject}" a ${n} ${n === 1 ? 'destinatario' : 'destinatarios'}${attach ? ' con el Excel adjunto' : ''}?\n\nSale desde ${mail.envio.desde}.\nPara: ${to.join(', ')}${cc.length ? `\nCC: ${cc.join(', ')}` : ''}`)) return;
+    const btn = $('#mlSend'); btn.disabled = true; btn.textContent = 'Enviando…';
+    try {
+      const body = { para: to.join(','), cc: cc.join(','), asunto: subject, html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:16px;background:#EEF1F8">${mailHtml()}</body></html>` };
+      if (attach) body.adjunto = { nombre: `Analisis_Vs_Anual_${stamp()}.xlsx`, base64: b64bytes(new Uint8Array(await workbookBuffer(mail.sheets, mail.sub))) };
+      const r = await api('/api/correo/enviar', { method: 'POST', body });
+      store.set('mailDraft', null); mail.edited = false;
+      const t = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+      setMailState(`Enviado a las ${t} a ${r.enviados} ${r.enviados === 1 ? 'destinatario' : 'destinatarios'} desde ${r.desde}.`);
+      $('#mlState').classList.remove('edited'); $('#mlState').classList.add('sent');
+      toast('Correo enviado.');
+    } catch (e) { $('#mlError').textContent = e.message; }
+    finally { btn.textContent = 'Enviar correo'; renderMailFrom(); }
+  }
+
   function checkRecipients() {
     const bad = [...mailList($('#mlTo').value), ...mailList($('#mlCc').value)].filter((e) => !EMAIL_OK.test(e));
     $('#mlError').textContent = bad.length ? `Revisa estos correos: ${bad.slice(0, 3).join(', ')}.` : '';
@@ -1619,6 +1655,7 @@
     $('#mlSubject').addEventListener('input', () => { mail.subjEdited = !!$('#mlSubject').value.trim(); syncMailMeta(); saveDraft(); });
     $('#mlTo').addEventListener('input', saveRecipients);
     $('#mlCc').addEventListener('input', saveRecipients);
+    $('#mlSend').addEventListener('click', () => mailSend().catch((e) => toast(e.message)));
     $('#mlEml').addEventListener('click', () => mailEml().catch((e) => toast(e.message)));
     $('#mlCopyOpen').addEventListener('click', () => mailCopyOpen().catch((e) => toast(e.message)));
     $('#mlCopy').addEventListener('click', async () => { await copyMail(); toast('Correo copiado con formato. Pégalo con Ctrl+V en tu correo.'); });
