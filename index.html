@@ -22,12 +22,34 @@
       <button class="tab" data-view="resumen" role="tab">Resumen</button>
       <button class="tab" data-view="comparativa" role="tab">Comparativa</button>
       <button class="tab" data-view="anual" role="tab">Por año</button>
-      <button class="tab active" data-view="datos" role="tab">Datos</button>
+      <button class="tab active" data-view="datos" role="tab" data-perm="datos">Datos</button>
+      <button class="tab" data-view="admin" role="tab" data-perm="admin_usuarios" hidden>Administración</button>
     </nav>
+    <div class="dl-group" id="dlGroup" hidden>
+      <button class="btn btn-ghost" id="btnPdf" type="button" title="Descargar esta vista en PDF">PDF</button>
+      <button class="btn btn-ghost" id="btnXlsx" type="button" title="Descargar los datos visibles en Excel">Excel</button>
+    </div>
     <div class="userbox" id="userBox"></div>
   </header>
 
-  <main>
+  <div class="scope-bar" id="scopeBar" hidden></div>
+
+  <!-- Pantalla de inicio de sesión (el reporte requiere sesión) -->
+  <section class="gate" id="gate" hidden>
+    <div class="gate-card">
+      <span class="logo gate-logo">VS</span>
+      <h1>Reporte Vs Anual</h1>
+      <p class="muted">Ingresa con tu DNI y contraseña para ver el reporte.</p>
+      <form id="formGate" class="gate-form">
+        <label>DNI<input name="dni" inputmode="numeric" autocomplete="username" required></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="form-error" data-error></p>
+        <button class="btn btn-primary" type="submit">Ingresar</button>
+      </form>
+    </div>
+  </section>
+
+  <main id="appMain">
     <!-- ============ DATOS ============ -->
     <section id="view-datos" class="view active">
       <div id="serverStatus" class="server-status" hidden></div>
@@ -379,7 +401,51 @@
       </section>
     </section>
 
+    <!-- ============ ADMINISTRACIÓN ============ -->
+    <section id="view-admin" class="view">
+      <header class="data-head">
+        <div>
+          <h2>Usuarios y perfiles</h2>
+          <p class="muted">Crea cuentas, asígnales un perfil y, si el perfil no ve todo, el coordinador cuyas tiendas pueden ver.</p>
+        </div>
+      </header>
+      <div class="admin-grid">
+        <article class="panel">
+          <div class="panel-head"><h3>Usuarios</h3><button class="btn btn-primary" id="btnNewUser" type="button">Nuevo usuario</button></div>
+          <div class="table-wrap"><table id="tblAdminUsers" class="tbl cmp"></table></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><h3>Perfiles</h3><button class="btn" id="btnNewProfile" type="button">Nuevo perfil</button></div>
+          <div class="profile-cards" id="profileCards"></div>
+        </article>
+      </div>
+    </section>
   </main>
+
+  <dialog id="dlgUser" class="dlg">
+    <form id="formUserEdit" method="dialog">
+      <h2 data-title>Nuevo usuario</h2>
+      <label>DNI<input name="dni" inputmode="numeric" pattern="\d{8,12}" required></label>
+      <label>Nombre<input name="nombre" required></label>
+      <label>Perfil<select name="perfil_id" required></select></label>
+      <label data-coord>Coordinador asignado<input name="coordinador" list="coordListAll" placeholder="Ej. HERLES CORNELIO"><small class="muted">Solo verá las tiendas de este coordinador.</small></label>
+      <label>Contraseña <span data-pwhint>(mín. 8)</span><input name="password" type="password" minlength="8" autocomplete="new-password"></label>
+      <datalist id="coordListAll"></datalist>
+      <p class="form-error" data-error></p>
+      <div class="dlg-actions"><button type="button" class="btn" data-close>Cancelar</button><button class="btn btn-primary" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlgProfile" class="dlg">
+    <form id="formProfile" method="dialog">
+      <h2 data-title>Nuevo perfil</h2>
+      <input type="hidden" name="id">
+      <label>Nombre del perfil<input name="nombre" required maxlength="60"></label>
+      <fieldset class="perm-list" id="permList"></fieldset>
+      <p class="form-error" data-error></p>
+      <div class="dlg-actions"><button type="button" class="btn" data-close>Cancelar</button><button class="btn btn-primary" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" hidden></div>
 

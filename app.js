@@ -488,21 +488,45 @@
   }
 
   function setSession(s) {
+    const was = session.token;
     session.token = s ? s.token : null;
     session.user = s ? s.user : null;
     store.set('token', session.token); store.set('user', session.user);
+    if (!s && was) location.reload(); // borra de la pantalla los datos del usuario anterior
     renderSession();
   }
 
+  const perm = (k) => !!session.user?.perms?.[k];
+  const canDatos = () => perm('subir') || perm('eliminar') || perm('gestionar_coord');
+
   function renderSession() {
     const u = session.user;
+    // Sin sesión no se ve nada del reporte: solo la pantalla de ingreso.
+    document.body.classList.toggle('locked', !u);
+    $('#gate').hidden = !!u;
     $('#userBox').innerHTML = u
-      ? `<span class="who">👤 ${esc(u.nombre)}</span>${u.admin ? '<button class="btn btn-ghost" id="btnUsers">Usuarios</button>' : ''}<button class="btn btn-ghost" id="btnPwd">Contraseña</button><button class="btn btn-ghost" id="btnLogout">Salir</button>`
-      : `<button class="btn btn-primary" data-open-login>Iniciar sesión</button>`;
-    $('#uploadArea').hidden = !u;
+      ? `<span class="who">👤 ${esc(u.nombre)}</span><span class="perfil">${esc(u.perfil || '')}</span><button class="btn btn-ghost" id="btnPwd">Contraseña</button><button class="btn btn-ghost" id="btnLogout">Salir</button>`
+      : '';
+    $('.tab[data-view="datos"]').hidden = !canDatos();
+    $('.tab[data-view="admin"]').hidden = !perm('admin_usuarios');
+    $('#dlGroup').hidden = !perm('descargar');
+    $('#btnExport').hidden = !perm('descargar');
+    $('#uploadArea').hidden = !perm('subir');
+    $('#loginHint').hidden = true;
     renderCoord();
-    $('#loginHint').hidden = !!u;
     renderBase();
+    if (u && ((state.view === 'datos' && !canDatos()) || (state.view === 'admin' && !perm('admin_usuarios')))) setView('resumen');
+  }
+
+  function renderScope(D) {
+    const bar = $('#scopeBar');
+    const u = session.user;
+    if (u && !perm('ver_todo')) {
+      bar.hidden = false;
+      bar.innerHTML = D?.alcance && !D.alcance.startsWith('##')
+        ? `Estás viendo solo las tiendas de <b>${esc(D.alcance)}</b>.`
+        : 'Tu usuario todavía no tiene un coordinador asignado, así que no hay tiendas para mostrar. Pide a un administrador que te lo asigne.';
+    } else bar.hidden = true;
   }
 
   let serverData = null, coordData = null;
@@ -513,13 +537,14 @@
     box.hidden = !coordData.coordinadores.length && !coordData.reemplazos.length;
     $('#tblCoord').innerHTML = `<thead><tr><th>Coordinador</th><th class="num">Tiendas</th><th class="num">Venta</th></tr></thead><tbody>${
       coordData.coordinadores.map((c) => `<tr><td>${esc(c.coordinador)}</td><td class="num">${num(c.tiendas)}</td><td class="num">${money(c.venta)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Aún no hay coordinadores guardados: vuelve a subir los archivos.</td></tr>'}</tbody>`;
-    const logged = !!session.user;
+    const logged = perm('gestionar_coord');
     $('#tblRepl').innerHTML = `<thead><tr><th>Nombre en el archivo</th><th>Se muestra como</th>${logged ? '<th></th>' : ''}</tr></thead><tbody>${
       coordData.reemplazos.map((r) => `<tr><td>${esc(r.original)}</td><td><b>${esc(r.nuevo)}</b></td>${logged ? `<td><button class="btn btn-danger" data-del-repl="${esc(r.original)}">Quitar</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="3" class="muted">Sin reemplazos.</td></tr>'}</tbody>`;
     $('#formRepl').hidden = !logged;
     $('#coordList').innerHTML = coordData.coordinadores.map((c) => `<option value="${esc(c.coordinador)}">`).join('');
   }
   async function loadServer() {
+    if (!session.token) return;
     const st = $('#serverStatus');
     st.hidden = false; st.className = 'server-status';
     st.innerHTML = '<span class="spinner"></span> Cargando los datos de la base… (si el servidor estaba en reposo puede tardar hasta un minuto)';
@@ -527,10 +552,11 @@
       serverData = await api('/api/data');
       cmp.data = null; cmp.cache = null;
       const firstLoad = !state.loadedOnce; state.loadedOnce = true;
-      api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); }).catch(() => {});
+      api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); fillCoordList(); }).catch(() => {});
       applyServerData(serverData);
+      renderScope(serverData);
       st.hidden = true;
-      if (firstLoad && state.records.length && state.view === 'datos') setView('resumen');
+      if (firstLoad && (state.records.length || !canDatos()) && state.view === 'datos') setView('resumen');
     } catch (e) {
       st.className = 'server-status err';
       st.innerHTML = `${esc(e.message)} <button class="btn" id="btnRetry">Reintentar</button>`;
@@ -565,7 +591,7 @@
   function renderBase() {
     const D = serverData;
     if (!D) return;
-    const logged = !!session.user;
+    const logged = perm('eliminar');
     const monthsOf = new Map();
     for (const r of state.records) if (r.v) (monthsOf.get(r.y) || monthsOf.set(r.y, new Set()).get(r.y)).add(r.m);
     $('#baseYears').innerHTML = D.anios.length ? [...D.anios].reverse().map((a) => {
@@ -1108,6 +1134,109 @@
         },
         scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
       },
+    });
+  }
+
+  // ---------------------------------------------------------------- administración: usuarios y perfiles
+  const PERM_INFO = {
+    ver_todo: ['Ver todas las tiendas', 'Si no se marca, solo ve las tiendas del coordinador asignado al usuario.'],
+    subir: ['Subir y reemplazar datos', 'Cargar archivos de Excel o CSV a la base.'],
+    eliminar: ['Eliminar años de la base', 'Borrar todos los datos de un año.'],
+    gestionar_coord: ['Cambiar nombres de coordinadores', 'Crear o quitar reemplazos de nombres.'],
+    descargar: ['Descargar PDF y Excel', 'Bajar lo que tiene en pantalla.'],
+    admin_usuarios: ['Gestionar usuarios y perfiles', 'Crear, editar y eliminar usuarios y perfiles.'],
+  };
+  const admin = { users: [], perfiles: [] };
+
+  function fillCoordList() {
+    $('#coordListAll').innerHTML = (coordData?.coordinadores || []).map((c) => `<option value="${esc(c.coordinador)}">`).join('');
+  }
+
+  async function loadAdmin() {
+    if (!perm('admin_usuarios')) return;
+    try {
+      const [u, p] = await Promise.all([api('/api/usuarios'), api('/api/perfiles')]);
+      admin.users = u.usuarios; admin.perfiles = p.perfiles;
+      renderAdmin();
+    } catch (e) { toast(e.message); }
+  }
+
+  function renderAdmin() {
+    const P = admin.perfiles;
+    $('#tblAdminUsers').innerHTML = `<thead><tr><th>Nombre</th><th>DNI</th><th>Perfil</th><th>Ve</th><th></th></tr></thead><tbody>${
+      admin.users.map((u) => `<tr><td><b>${esc(u.nombre)}</b></td><td>${esc(u.dni)}</td><td><span class="role-chip">${esc(u.perfil || 'Sin perfil')}</span></td>
+        <td>${u.ver_todo ? 'Todas las tiendas' : u.coordinador ? `Tiendas de ${esc(u.coordinador)}` : '<span class="down">Falta asignar coordinador</span>'}</td>
+        <td class="num"><button class="btn" data-edit-user="${esc(u.dni)}">Editar</button> ${u.dni === session.user.dni ? '' : `<button class="btn btn-danger" data-del-user="${esc(u.dni)}">Eliminar</button>`}</td></tr>`).join('')}</tbody>`;
+    $('#profileCards').innerHTML = P.map((p) => `<article class="pc">
+      <div class="pc-head"><span class="pc-name">${esc(p.nombre)}</span><span class="pc-count">${p.usuarios} ${p.usuarios === 1 ? 'usuario' : 'usuarios'}</span></div>
+      <ul class="pc-perms">${Object.keys(PERM_INFO).map((k) => `<li class="${p[k] ? 'on' : 'off'}">${PERM_INFO[k][0]}</li>`).join('')}</ul>
+      <div class="pc-actions"><button class="btn" data-edit-profile="${p.id}">Editar</button>${p.sistema ? '' : `<button class="btn btn-danger" data-del-profile="${p.id}">Eliminar</button>`}</div>
+    </article>`).join('');
+  }
+
+  function openUserDialog(u) {
+    const d = $('#dlgUser'), f = $('#formUserEdit');
+    f.reset(); $('[data-error]', f).textContent = '';
+    $('[data-title]', d).textContent = u ? `Editar a ${u.nombre}` : 'Nuevo usuario';
+    f.dni.value = u?.dni || ''; f.dni.readOnly = !!u;
+    f.nombre.value = u?.nombre || '';
+    f.perfil_id.innerHTML = admin.perfiles.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('');
+    f.perfil_id.value = u?.perfil_id || (admin.perfiles.find((p) => p.nombre === 'Coordinador') || admin.perfiles[0]).id;
+    f.coordinador.value = u?.coordinador || '';
+    f.password.required = !u;
+    $('[data-pwhint]', d).textContent = u ? '(déjala vacía para no cambiarla)' : '(mín. 8)';
+    const sync = () => { const p = admin.perfiles.find((x) => x.id === +f.perfil_id.value); $('[data-coord]', d).hidden = !!p?.ver_todo; };
+    f.perfil_id.onchange = sync; sync();
+    d.dataset.mode = u ? 'edit' : 'new';
+    d.showModal();
+  }
+
+  function openProfileDialog(p) {
+    const d = $('#dlgProfile'), f = $('#formProfile');
+    f.reset(); $('[data-error]', f).textContent = '';
+    $('[data-title]', d).textContent = p ? `Editar perfil ${p.nombre}` : 'Nuevo perfil';
+    f.id.value = p?.id || ''; f.nombre.value = p?.nombre || ''; f.nombre.readOnly = !!p?.sistema;
+    $('#permList').innerHTML = Object.entries(PERM_INFO).map(([k, [t, sub]]) => `<label><input type="checkbox" name="${k}" ${p?.[k] ? 'checked' : ''} ${p?.sistema && k === 'admin_usuarios' ? 'disabled checked' : ''}><span>${t}<small>${sub}</small></span></label>`).join('');
+    d.showModal();
+  }
+
+  function initAdmin() {
+    $('#btnNewUser').addEventListener('click', () => openUserDialog(null));
+    $('#btnNewProfile').addEventListener('click', () => openProfileDialog(null));
+    $('#tblAdminUsers').addEventListener('click', async (e) => {
+      const ed = e.target.closest('[data-edit-user]'), del = e.target.closest('[data-del-user]');
+      if (ed) openUserDialog(admin.users.find((u) => u.dni === ed.dataset.editUser));
+      if (del && confirm(`¿Eliminar el usuario con DNI ${del.dataset.delUser}? Ya no podrá ingresar.`)) {
+        try { await api('/api/usuarios/' + encodeURIComponent(del.dataset.delUser), { method: 'DELETE' }); toast('Usuario eliminado.'); loadAdmin(); } catch (x) { toast(x.message); }
+      }
+    });
+    $('#profileCards').addEventListener('click', async (e) => {
+      const ed = e.target.closest('[data-edit-profile]'), del = e.target.closest('[data-del-profile]');
+      if (ed) openProfileDialog(admin.perfiles.find((p) => p.id === +ed.dataset.editProfile));
+      if (del && confirm('¿Eliminar este perfil?')) {
+        try { await api('/api/perfiles/' + del.dataset.delProfile, { method: 'DELETE' }); toast('Perfil eliminado.'); loadAdmin(); } catch (x) { toast(x.message); }
+      }
+    });
+    $('#formUserEdit').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target, err = $('[data-error]', f), mode = $('#dlgUser').dataset.mode;
+      const body = { dni: f.dni.value.trim(), nombre: f.nombre.value, perfil_id: +f.perfil_id.value, coordinador: $('[data-coord]', f).hidden ? '' : f.coordinador.value, password: f.password.value };
+      try {
+        await api(mode === 'edit' ? '/api/usuarios/' + encodeURIComponent(body.dni) : '/api/usuarios', { method: 'POST', body });
+        $('#dlgUser').close(); toast(mode === 'edit' ? 'Usuario actualizado.' : 'Usuario creado.'); loadAdmin();
+        if (body.dni === session.user.dni) api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); loadServer(); });
+      } catch (x) { err.textContent = x.message; }
+    });
+    $('#formProfile').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target, err = $('[data-error]', f);
+      const body = { id: f.id.value ? +f.id.value : undefined, nombre: f.nombre.value };
+      for (const k of Object.keys(PERM_INFO)) body[k] = f[k].checked;
+      try {
+        await api('/api/perfiles', { method: 'POST', body });
+        $('#dlgProfile').close(); toast(body.id ? 'Perfil actualizado.' : 'Perfil creado.'); loadAdmin();
+        api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); });
+      } catch (x) { err.textContent = x.message; }
     });
   }
 
@@ -1874,6 +2003,152 @@
     },
   };
 
+  // ---------------------------------------------------------------- descargas con el formato del reporte (PDF y Excel)
+  const loaded = {};
+  const loadScript = (src) => loaded[src] || (loaded[src] = new Promise((ok, fail) => {
+    const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => fail(new Error('No se pudo cargar ' + src)); document.head.appendChild(el);
+  }));
+  const VIEW_NAME = { resumen: 'Resumen', comparativa: 'Comparativa', anual: 'Por año', datos: 'Datos', admin: 'Administración' };
+  const stamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  // Texto del corte y filtros para encabezados de descargas.
+  function cutLine(short) {
+    const F = lastF, C = F.C;
+    const corte = `Corte: ${C.dateText}${C.hasW ? ` (semana ${C.w})` : ''}`;
+    if (short) return corte;
+    const filt = [state.hasCob && F.cob !== 'all' ? COB_LABEL[F.cob] : null, F.tipo ? TIPO_LABEL[F.tipo] : null, F.chain ? `Cadena ${F.chain}` : null, F.brand ? `Marca ${F.brand}` : null].filter(Boolean);
+    return [corte, `Años ${F.years.join(', ')}`, ...filt].join(' · ');
+  }
+  const scopeText = () => (serverData?.alcance && !serverData.alcance.startsWith('##') ? ` · Tiendas de ${serverData.alcance}` : '');
+
+  // Tablas del Resumen (se arman con los mismos cálculos que la pantalla).
+  function resumenAOAs(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1, out = [];
+    const cur = R.byYear.get(Y), prev = R.byYear.get(P);
+    const kp = [['Acumulado al corte', prev?.ytd ?? null, cur.ytd], [`${C.monthLabel} (al corte)`, prev?.month ?? null, cur.month]];
+    if (C.hasW) kp.push([`Semana ${C.w}`, prev?.week ?? null, cur.week]);
+    out.push({ name: 'Resumen', title: 'Indicadores clave', T: { head: ['Indicador', String(P), String(Y), 'Var S/', 'Var %'], rows: kp.map(([l, a, b]) => [l, a, b, a == null ? null : b - a, varPct(b, a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    const months = [];
+    for (let m = 1; m <= 12; m++) { const a = R.byYM.get(P * 100 + m) || 0, b = m > C.m ? null : R.byYM.get(Y * 100 + m) || 0; months.push([MESES_LARGO[m - 1] + (m === C.m ? ' (al corte)' : ''), a, b, b == null ? null : b - a, b == null ? null : varPct(b, a)]); }
+    out.push({ name: 'Mes a mes', title: `Venta mes a mes ${Y} vs ${P}`, T: { head: ['Mes', String(P), String(Y), 'Var S/', 'Var %'], rows: months, foot: [], types: ['t', '$', '$', '$', '%'] } });
+    const ch = [...R.byChain.values()].map((o) => ({ c: o.cadena, a: o.y[P]?.ytd || 0, b: o.y[Y]?.ytd || 0 })).filter((x) => x.a || x.b).sort((x, y) => y.b - x.b);
+    const TA = ch.reduce((t, x) => t + x.a, 0), TB = ch.reduce((t, x) => t + x.b, 0);
+    out.push({ name: 'Cadenas', title: `Reparto por cadena (acumulado al corte)`, T: { head: ['Cadena', String(P), String(Y), 'Var %', `Part. ${P}`, `Part. ${Y}`], rows: ch.map((x) => [x.c, x.a, x.b, varPct(x.b, x.a), TA ? x.a / TA : null, TB ? x.b / TB : null]), foot: [['Total', TA, TB, varPct(TB, TA), TA ? 1 : null, TB ? 1 : null]], types: ['t', '$', '$', '%', 'p', 'p'] } });
+    const st = [...R.byStore.values()].map((o) => ({ o, a: o.y[P]?.ytd || 0, b: o.y[Y]?.ytd || 0 })).filter((x) => x.a || x.b).map((x) => [x.o.cadena, x.o.tienda, x.a, x.b, x.b - x.a, varPct(x.b, x.a)]).sort((x, y) => y[4] - x[4]);
+    out.push({ name: 'Tiendas', title: 'Tiendas ordenadas por diferencia (acumulado al corte)', T: { head: ['Cadena', 'Tienda', String(P), String(Y), 'Var S/', 'Var %'], rows: st, foot: [], types: ['t', 't', '$', '$', '$', '%'] } });
+    return out;
+  }
+
+  function sheetsForView() {
+    const F = lastF, R = lastR, v = state.view;
+    if (v === 'resumen') return resumenAOAs(F, R);
+    if (v === 'anual') {
+      const out = [{ name: 'Por año', title: 'Evaluación por año', T: yearsAOA(F, R) }];
+      if (F.showShare) out.push({ name: 'Paraíso vs Competencia', title: 'Paraíso vs Competencia por año', T: groupsAOA(F, R) });
+      return out;
+    }
+    if (v === 'comparativa' && cmp.last) {
+      const hasU = cmp.last.list.some((g) => g.uA || g.uB);
+      const out = [];
+      if (cmp.analysis?.length) out.push({ name: 'Análisis', title: 'Análisis del Vs', lines: cmp.analysis });
+      out.push({ name: 'Soles', title: `Comparativa en soles por ${cmp.last.labels.join(' / ').toLowerCase()}`, T: cmpAOA('v') });
+      if (hasU) out.push({ name: 'Unidades', title: 'Comparativa en unidades', T: cmpAOA('u') });
+      if (cmp.wk?.weeks.length) { out.push({ name: 'Semanas soles', title: 'Soles por semana', T: weekAOA('v') }); if (hasU) out.push({ name: 'Semanas und', title: 'Unidades por semana', T: weekAOA('u') }); }
+      return out;
+    }
+    return [];
+  }
+
+  async function exportXlsxStyled() {
+    if (!lastR) return toast('Todavía no hay datos para descargar.');
+    const sheets = sheetsForView();
+    if (!sheets.length) return toast('Esta pestaña no tiene tablas para descargar.');
+    toast('Preparando el Excel…');
+    await loadScript('vendor/exceljs.min.js');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Reporte Vs Anual';
+    const NIGHT = 'FF1B1F4B', ZEBRA = 'FFF8F9FD', GOOD = 'FF0E8F6B', BAD = 'FFD42E43';
+    const sub = `${VIEW_NAME[state.view]} · ${cutLine()}${scopeText()}`;
+    for (const sh of sheets) {
+      const ws = wb.addWorksheet(sh.name.slice(0, 31), { views: [{ showGridLines: false }] });
+      ws.getCell('A1').value = sh.title; ws.getCell('A1').font = { name: 'Calibri', size: 16, bold: true, color: { argb: NIGHT } };
+      ws.getCell('A2').value = sub; ws.getCell('A2').font = { size: 10, color: { argb: 'FF7C829E' } };
+      if (sh.lines) { sh.lines.forEach((t, i) => { const c = ws.getCell(4 + i, 1); c.value = '• ' + t; c.alignment = { wrapText: true, vertical: 'top' }; }); ws.getColumn(1).width = 140; continue; }
+      const T = sh.T, hr = 4;
+      const fmt = (t) => (t === '$' ? '"S/" #,##0.00' : t === '%' ? '+0.0%;-0.0%;0.0%' : t === 'p' ? '0.0%' : t === 'pp' ? '+0.0%;-0.0%' : t === 'n' ? '#,##0' : '@');
+      const header = ws.getRow(hr); header.values = T.head; header.height = 30;
+      header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NIGHT } }; c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
+      const put = (arr, rowIdx, kind) => {
+        const row = ws.getRow(rowIdx); row.values = arr.map((v) => (v == null ? '' : v));
+        row.eachCell({ includeEmpty: true }, (c, col) => {
+          const t = T.types[col - 1];
+          if (t && t !== 't') { c.numFmt = fmt(t); c.alignment = { horizontal: 'right' }; }
+          if (kind === 'foot') { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NIGHT } }; c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; }
+          else if (kind === 'zebra') c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ZEBRA } };
+          if (kind !== 'foot' && (t === '%' || t === 'pp') && typeof c.value === 'number') c.font = { bold: true, color: { argb: c.value >= 0 ? GOOD : BAD } };
+          c.border = { bottom: { style: 'thin', color: { argb: 'FFE2E6F0' } } };
+        });
+      };
+      T.rows.forEach((r, i) => put(r, hr + 1 + i, i % 2 ? 'zebra' : 'row'));
+      (T.foot || []).forEach((r, i) => put(r, hr + 1 + T.rows.length + i, 'foot'));
+      T.head.forEach((h, i) => { ws.getColumn(i + 1).width = T.types[i] === 't' ? Math.max(14, Math.min(34, Math.max(String(h).length, ...T.rows.slice(0, 200).map((r) => String(r[i] ?? '').length)) + 2)) : Math.max(13, Math.min(22, String(h).length + 2)); });
+      ws.views = [{ showGridLines: false, state: 'frozen', ySplit: hr }];
+      if (T.rows.length) ws.autoFilter = { from: { row: hr, column: 1 }, to: { row: hr + T.rows.length, column: T.head.length } };
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    a.download = `Reporte_Vs_Anual_${VIEW_NAME[state.view].replace(/\s/g, '_')}_${stamp()}.xlsx`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // PDF: captura la pestaña tal como se ve y la reparte en hojas A4 horizontales sin cortar los bloques.
+  async function exportPdf() {
+    const node = $('#view-' + state.view);
+    if (!node || !lastR) return toast('Todavía no hay datos para descargar.');
+    toast('Preparando el PDF…');
+    await Promise.all([loadScript('vendor/html2canvas.min.js'), loadScript('vendor/jspdf.umd.min.js')]);
+    document.body.classList.add('pdf-mode');
+    // Las secciones plegadas se abren para la captura (y así el PDF incluye el análisis completo).
+    const closed = [...node.querySelectorAll('details:not([open])')];
+    closed.forEach((d) => (d.open = true));
+    window.scrollTo(0, 0);
+    await new Promise((r) => setTimeout(r, 120));
+    try {
+      const scale = 2;
+      const canvas = await html2canvas(node, { scale, backgroundColor: '#F4F6FB', useCORS: true, logging: false, windowWidth: document.documentElement.clientWidth });
+      const top0 = node.getBoundingClientRect().top + window.scrollY;
+      // Puntos de corte: inicio de cada bloque; si el bloque va justo después de un título de sección, se corta antes del título.
+      const breaks = [...node.querySelectorAll('.hero, .period, .story, .panel, .insights, .pair, .timeline, .year-cards')]
+        .map((el) => { const blk = el.parentElement?.closest('.pair, .insights') || el; const prev = blk.previousElementSibling; return prev && prev.matches('.story-title, .story-head, .subnav') ? prev : blk; })
+        .map((el) => Math.round((el.getBoundingClientRect().top + window.scrollY - top0) * scale)).filter((y) => y > 0).sort((a, b) => a - b);
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const PW = 297, PH = 210, M = 8, HEAD = 12;
+      const imgW = PW - 2 * M, pxPerMm = canvas.width / imgW, maxH = Math.floor((PH - M - HEAD - 6) * pxPerMm);
+      let y = 0, page = 0;
+      const title = `Reporte Vs Anual · ${VIEW_NAME[state.view]}${scopeText()}`;
+      const cut = cutLine(true);
+      while (y < canvas.height - 4) {
+        let end = Math.min(canvas.height, y + maxH);
+        if (end < canvas.height) { const b = breaks.filter((v) => v > y + maxH * 0.35 && v <= end).pop(); if (b) end = b - 6 * scale; }
+        const h = end - y;
+        const part = document.createElement('canvas'); part.width = canvas.width; part.height = h;
+        part.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+        if (page) pdf.addPage();
+        pdf.setFillColor(27, 31, 75); pdf.rect(0, 0, PW, HEAD, 'F');
+        pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text(title, M, 8);
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(`${cut}  |  ${session.user?.nombre || ''}  |  ${new Date().toLocaleDateString('es-PE')}`, PW - M, 8, { align: 'right' });
+        pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', M, HEAD + 4, imgW, h / pxPerMm);
+        pdf.setTextColor(124, 130, 158); pdf.setFontSize(8); pdf.text(`Página ${page + 1}`, PW - M, PH - 4, { align: 'right' });
+        y = end; page++;
+      }
+      pdf.save(`Reporte_Vs_Anual_${VIEW_NAME[state.view].replace(/\s/g, '_')}_${stamp()}.pdf`);
+    } finally {
+      closed.forEach((d) => (d.open = false));
+      document.body.classList.remove('pdf-mode');
+    }
+  }
+
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
     const F = lastF, R = lastR;
@@ -1933,9 +2208,10 @@
     state.view = v;
     $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === v));
     $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
-    $('#analysis').hidden = v === 'datos';
+    $('#analysis').hidden = v === 'datos' || v === 'admin';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
     if (v === 'comparativa') renderCmp();
+    if (v === 'admin') loadAdmin();
     requestAnimationFrame(() => requestAnimationFrame(() => Object.values(state.charts).forEach((c) => c.resize())));
     window.scrollTo({ top: 0 });
   }
@@ -1979,7 +2255,7 @@
       err.textContent = '';
       try {
         const r = await api('/api/login', { method: 'POST', body: { dni: fd.get('dni'), password: fd.get('password') } });
-        setSession(r); e.target.reset(); $('#dlgLogin').close(); toast(`Hola, ${r.user.nombre}.`);
+        setSession(r); e.target.reset(); $('#dlgLogin').close(); toast(`Hola, ${r.user.nombre}.`); loadServer();
       } catch (x) { err.textContent = x.message; }
     });
     $('#formPassword').addEventListener('submit', async (e) => {
@@ -2019,7 +2295,9 @@
     $('#fFrom').addEventListener('change', () => { state.fromTouched = true; });
     ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', renderAll));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
-    $('#btnExport').addEventListener('click', exportExcel);
+    $('#btnExport').addEventListener('click', () => (perm('descargar') ? exportXlsxStyled().catch((e) => toast(e.message)) : toast('Tu perfil no puede descargar.')));
+    $('#btnXlsx').addEventListener('click', () => exportXlsxStyled().catch((e) => toast(e.message)));
+    $('#btnPdf').addEventListener('click', () => exportPdf().catch((e) => { document.body.classList.remove('pdf-mode'); toast(e.message); }));
     $('#sumShare').addEventListener('click', (e) => { const b = e.target.closest('[data-chain]'); if (b) goDetail({ months: [lastF.C.m], days: lastF.C.d ? Array.from({ length: lastF.C.d }, (_, i) => i + 1) : [], by: 'tienda', chain: b.dataset.chain }); });
     for (const id of ['#sumUp', '#sumDown']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-chain]'); if (b) goDetail({ months: [lastF.C.m], days: lastF.C.d ? Array.from({ length: lastF.C.d }, (_, i) => i + 1) : [], by: 'tienda', chain: b.dataset.chain }); });
     const heat = $('#sumHeat'), tip = $('#heatTip');
@@ -2067,9 +2345,19 @@
     ['#cmpYearA', '#cmpYearB', '#cmpBy'].forEach((s) => $(s).addEventListener('change', renderCmp));
     renderFiles();
     renderSession();
-    loadServer();
-    // Comprueba que la sesión guardada siga siendo válida.
-    if (session.token) api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); }).catch(() => {});
+    // Comprueba que la sesión guardada siga siendo válida y trae los permisos vigentes.
+    if (session.token) api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); loadServer(); }).catch(() => { setSession(null); });
+    $('#formGate').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target), err = $('[data-error]', e.target);
+      err.textContent = '';
+      const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Ingresando…';
+      try {
+        const r = await api('/api/login', { method: 'POST', body: { dni: fd.get('dni'), password: fd.get('password') } });
+        setSession(r); e.target.reset(); loadServer();
+      } catch (x) { err.textContent = x.message; } finally { btn.disabled = false; btn.textContent = 'Ingresar'; }
+    });
+    initAdmin();
   }
 
   // Exponer funciones de parseo para pruebas automáticas.

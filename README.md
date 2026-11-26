@@ -92,12 +92,28 @@ Lo que agrega esta clasificación:
 
 La lista de marcas Paraíso está en `app.js`, en la constante `MARCAS_PARAISO`.
 
+## Usuarios y perfiles
+
+Para ver el reporte hay que **iniciar sesión** con DNI y contraseña. Los administradores gestionan los accesos en la pestaña **Administración**.
+
+| Perfil | Ve | Puede |
+|---|---|---|
+| **Administrador** | Todas las tiendas | Todo, incluido gestionar usuarios y perfiles |
+| **Analista** | Todas las tiendas | Subir y eliminar datos, cambiar nombres de coordinadores y descargar. No gestiona usuarios ni perfiles |
+| **Coordinador** | Solo las tiendas del coordinador asignado al usuario | Ver y descargar PDF y Excel de lo que ve |
+| **Gerencia** | Todas las tiendas | Ver y descargar PDF y Excel |
+
+- **Perfiles nuevos:** se crean marcando permisos (ver todas las tiendas, subir, eliminar, cambiar nombres de coordinadores, descargar, gestionar usuarios).
+- **Alcance de un usuario que no ve todo:** se le asigna un **coordinador** y solo ve las tiendas de ese coordinador, año por año. El filtro lo aplica el **servidor**, así que a ese usuario nunca le llegan los datos de otras tiendas, ni los totales generales.
+- **Descargas:**
+  - **PDF:** captura la pestaña tal como se ve, en hojas A4 horizontales, sin cortar los bloques, con encabezado de corte, usuario y fecha.
+  - **Excel:** formato del reporte (encabezados índigo, filas alternas, formatos de soles y %, Var % en verde o rojo), con una hoja por tabla de la pestaña.
+
 ## Base de datos compartida
 
 Los datos se guardan en PostgreSQL (base **Proyectos_Below_Db**, esquema `reporte_vs_anual`), así que todas las personas ven el mismo reporte.
 
-- **Ver**: cualquiera con el enlace, sin iniciar sesión.
-- **Subir y eliminar datos**: solo usuarios con DNI y contraseña. Los administradores crean usuarios desde el botón **Usuarios**.
+- **Acceso:** según el perfil (ver la sección Usuarios y perfiles).
 - **Al guardar**, cada año que venga en los archivos **reemplaza por completo** a ese año en la base. Así, subir el archivo actualizado de 2026 no duplica las ventas. Cada carga queda registrada: quién, cuándo, qué archivos y qué años.
 - A la base solo se envían las ventas ya resumidas por cadena, tienda, marca, año, mes y semana, no los archivos completos.
 

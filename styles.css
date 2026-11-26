@@ -608,3 +608,42 @@ h1, h2, h3, h4, .k-value, .hero-line, .ins-value, .hk-value { font-family: "Sora
 }
 .tl-badge.ghost { visibility: hidden; }
 .tbl tfoot td.dbar::before { display: none; }
+
+/* ---------- Sesión, alcance, descargas y administración ---------- */
+.gate { min-height: calc(100vh - 64px); display: grid; place-items: center; padding: 30px 16px; background: radial-gradient(circle at 20% 0%, #E8EEFF 0, transparent 45%), var(--bg); }
+.gate-card { width: min(420px, 100%); background: #fff; border: 1px solid var(--border); border-radius: 22px; padding: 32px 30px; box-shadow: 0 30px 60px -40px rgba(27, 31, 75, .6); text-align: center; }
+.gate-logo { width: 54px; height: 54px; margin: 0 auto 14px; font-size: 18px; color: #fff; }
+.gate-card h1 { font: 800 24px "Sora", sans-serif; color: var(--text); }
+.gate-form { display: grid; gap: 12px; margin-top: 18px; text-align: left; }
+.gate-form label { display: grid; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.gate-form input { font: inherit; font-size: 15px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.gate-form .btn { justify-content: center; padding: 11px; font-size: 15px; }
+body.locked main, body.locked .tabs, body.locked #dlGroup, body.locked .filter-handle { display: none !important; }
+
+.scope-bar { background: #FFF4E8; color: #8A4B0B; border-bottom: 1px solid #FFD9B3; padding: 8px 24px; font-size: 13.5px; text-align: center; }
+.scope-bar b { color: #6B3A06; }
+.dl-group { display: flex; gap: 6px; }
+.userbox .perfil { font-size: 11.5px; font-weight: 700; background: #ffffff1f; color: #fff; border-radius: 999px; padding: 2px 9px; }
+
+.admin-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.profile-cards { display: grid; gap: 12px; }
+.pc { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; }
+.pc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pc-name { font: 700 16px "Sora", sans-serif; }
+.pc-count { font-size: 12.5px; color: var(--muted); }
+.pc-perms { list-style: none; margin: 10px 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12.5px; }
+.pc-perms li.on { color: var(--text); } .pc-perms li.off { color: #A3A9C4; text-decoration: line-through; }
+.pc-perms li::before { content: "✓ "; color: var(--good); font-weight: 800; } .pc-perms li.off::before { content: "✕ "; color: #C3C7D8; }
+.pc-actions { display: flex; gap: 8px; }
+.perm-list { border: 0; padding: 0; margin: 4px 0 8px; display: grid; gap: 10px; }
+.perm-list label { flex-direction: row !important; align-items: flex-start; gap: 10px; margin: 0 !important; font-weight: 500 !important; color: var(--text) !important; font-size: 13.5px !important; }
+.perm-list label small { display: block; color: var(--muted); font-size: 12px; }
+.perm-list input { margin-top: 3px; }
+.dlg small.muted { font-weight: 400; }
+.role-chip { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: #E8EEFF; color: #2A55E0; }
+@media (max-width: 1000px) { .admin-grid { grid-template-columns: 1fr; } }
+@media print { .topbar, .scope-bar, .filter-handle, .drawer, .period, .subnav { display: none !important; } }
+/* Captura para PDF: sin elementos pegajosos ni índice */
+body.pdf-mode .period { position: static; backdrop-filter: none; background: #fff; }
+body.pdf-mode .subnav, body.pdf-mode [data-copy], body.pdf-mode .seg { display: none !important; }
+body.pdf-mode .table-wrap { max-height: none !important; overflow: visible !important; }
