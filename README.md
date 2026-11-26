@@ -180,6 +180,17 @@ coordinadores y mes a mes. Se puede elegir el período (acumulado, mes o semana 
 - Los destinatarios (Para y CC) se guardan en la base (tabla `ajustes`), así que aparecen en cualquier equipo.
 - **Enviar correo** lo envía directamente desde la cuenta configurada en el servidor (queda en sus Enviados), con confirmación previa. Máximo 30 correos por hora.
 
+### Envío por Google Apps Script (plan gratis de Render)
+
+El plan gratis de Render bloquea los puertos de correo (SMTP), así que el envío directo da "Connection timeout".
+La solución gratis: un pequeño script de Google que corre con la cuenta de Gmail y envía el correo (queda en Enviados).
+
+1. Pega `api/gmail-apps-script.gs` en un proyecto nuevo de https://script.google.com y pon una clave larga en `CLAVE`.
+2. Implementar → Nueva implementación → Aplicación web · Ejecutar como: Yo · Acceso: Cualquier usuario. Autoriza los permisos.
+3. En Render (API → Environment): `MAIL_WEBHOOK_URL` = la URL que termina en `/exec`, y `MAIL_WEBHOOK_SECRET` = la misma clave.
+
+Si existe `MAIL_WEBHOOK_URL`, la API usa el script; si no, intenta SMTP (necesita un plan pago de Render).
+
 ### Configurar la cuenta de envío (Gmail / Google Workspace)
 
 En Render, servicio de la API → *Environment*:

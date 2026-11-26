@@ -565,11 +565,15 @@ const EMAIL_RE = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
 const emails = (v) => String(v ?? '').split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
 // Envío desde la cuenta de correo configurada en el servidor (Gmail / Google Workspace con contraseña de aplicación).
 const SMTP_USER = (process.env.SMTP_USER || '').trim(), SMTP_PASS = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-const smtpReady = () => !!(SMTP_USER && SMTP_PASS);
+// Plan gratis de Render: los puertos de correo están bloqueados. Entonces se envía por HTTPS a un
+// script de Google Apps Script que corre con la cuenta de Gmail (ver api/gmail-apps-script.gs).
+const HOOK_URL = (process.env.MAIL_WEBHOOK_URL || '').trim(), HOOK_SECRET = process.env.MAIL_WEBHOOK_SECRET || '';
+const hookReady = () => /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(HOOK_URL) && HOOK_SECRET.length >= 12;
+const smtpReady = () => hookReady() || !!(SMTP_USER && SMTP_PASS);
 let mailer = null;
 const getMailer = () => mailer || (mailer = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com', port: +(process.env.SMTP_PORT || 465), secure: +(process.env.SMTP_PORT || 465) === 465,
-  auth: { user: SMTP_USER, pass: SMTP_PASS },
+  auth: { user: SMTP_USER, pass: SMTP_PASS }, connectionTimeout: 15e3, greetingTimeout: 15e3,
 }));
 const sendLog = [];
 
@@ -601,6 +605,26 @@ app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
     attachments.push({ filename: filename.endsWith('.xlsx') ? filename : filename + '.xlsx', content, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
   const nombre = String(req.user.nombre || '').replace(/["\r\n<>]/g, '').trim();
+  if (hookReady()) {
+    try {
+      const r = await fetch(HOOK_URL, {
+        method: 'POST', redirect: 'follow', signal: AbortSignal.timeout(90e3),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ secret: HOOK_SECRET, para: para.join(','), cc: cc.join(','), asunto, html, nombre,
+          adjunto: attachments[0] ? { nombre: attachments[0].filename, tipo: attachments[0].contentType, base64: attachments[0].content.toString('base64') } : null }),
+      });
+      const txt = await r.text();
+      let j; try { j = JSON.parse(txt); } catch { j = null; }
+      if (!j) return res.status(502).json({ error: 'El script de Google no respondió bien. Revisa que esté implementado como Aplicación web con acceso "Cualquier usuario".' });
+      if (!j.ok) return res.status(502).json({ error: `Google no envió el correo: ${j.error}` });
+      sendLog.push(now);
+      console.log(`Correo enviado (Apps Script) por ${req.user.dni} a ${para.length + cc.length} destinatarios.`);
+      return res.json({ ok: true, enviados: para.length + cc.length, desde: j.desde || SMTP_USER });
+    } catch (e) {
+      console.error('Error al enviar por Apps Script:', e.message);
+      return res.status(502).json({ error: `No se pudo enviar el correo: ${e.name === 'TimeoutError' ? 'Google tardó demasiado en responder' : e.message}` });
+    }
+  }
   try {
     const info = await getMailer().sendMail({
       from: nombre ? { name: nombre, address: SMTP_USER } : SMTP_USER,
@@ -612,6 +636,9 @@ app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
     res.json({ ok: true, enviados: para.length + cc.length, desde: SMTP_USER });
   } catch (e) {
     console.error('Error al enviar correo:', e.code || '', e.message);
+    if (['ETIMEDOUT', 'ESOCKET', 'ECONNECTION'].includes(e.code) || /timeout/i.test(e.message)) {
+      return res.status(502).json({ error: 'El servidor no puede conectarse a Gmail: el plan gratis de Render bloquea el correo directo. Configura el envío por Google Apps Script (MAIL_WEBHOOK_URL y MAIL_WEBHOOK_SECRET).' });
+    }
     const auth535 = e.code === 'EAUTH' || /535|Username and Password not accepted|Invalid login/i.test(e.message);
     res.status(502).json({ error: auth535
       ? 'Google rechazó el usuario o la contraseña de aplicación. Revisa SMTP_USER y SMTP_PASS en Render.'

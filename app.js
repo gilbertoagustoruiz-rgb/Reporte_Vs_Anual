@@ -1547,7 +1547,7 @@
     el.className = 'mail-from ' + (e.listo ? 'ok' : 'warn');
     el.innerHTML = e.listo
       ? `Sale desde <b>${esc(e.desde)}</b> y queda en tus Enviados.`
-      : `Todavía no está conectada la cuenta de envío${e.desde ? ` (${esc(e.desde)})` : ''}. Falta poner la contraseña de aplicación de Google en Render (SMTP_PASS). Mientras tanto usa "Otras formas de enviarlo".`;
+      : `Todavía no está conectada la cuenta de envío${e.desde ? ` (${esc(e.desde)})` : ''}. Falta terminar la configuración del envío en Render. Mientras tanto usa "Otras formas de enviarlo".`;
   }
 
   async function mailSend() {
