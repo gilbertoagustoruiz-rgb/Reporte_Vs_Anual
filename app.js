@@ -32,6 +32,7 @@
   const fmtNum0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
   const fmtPct = new Intl.NumberFormat('es-PE', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const money = (v) => fmtMoney0.format(v || 0);
+  const moneyShort = (v) => { const a = Math.abs(v || 0), sg = v < 0 ? '-' : ''; return a >= 1e6 ? `${sg}S/ ${(a / 1e6).toFixed(a >= 1e8 ? 0 : 1)} M` : a >= 1e4 ? `${sg}S/ ${(a / 1e3).toFixed(0)} mil` : `${sg}S/ ${fmtNum0.format(a)}`; };
   const num = (v) => fmtNum0.format(v || 0);
   const pct = (v) => (v == null || !isFinite(v) ? '—' : (v > 0 ? '+' : '') + fmtPct.format(v));
   const signMoney = (v) => (v > 0 ? '+' : '') + money(v);
@@ -802,7 +803,7 @@
 
   // ---------------------------------------------------------------- colores por año
   // El último año va en azul y el anterior en naranja; cada año conserva su color en toda la app.
-  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+  const PALETTE = ['#3D6BFF', '#FF8A3D', '#14B88A', '#8B5CF6', '#E0A100', '#E8618C', '#0EA5E9', '#8A93A3'];
   const yearColor = (y) => {
     const i = [...state.years].reverse().indexOf(y);
     return i < 0 ? '#9aa1ad' : i < PALETTE.length ? PALETTE[i] : '#9aa1ad';
@@ -944,6 +945,7 @@
     const row = (r) => `<tr>${r.map((v, i) => {
       if (i === T.stCol && v) { const st = Object.keys(STATUS_LABEL).find((s) => STATUS_LABEL[s].endsWith(v)); return `<td><span class="pill ${st}">${STATUS_LABEL[st]}</span></td>`; }
       if (T.types[i] === 't') return `<td>${esc(v)}</td>`;
+      if (T.bar === i && v != null && T.barMax) return `<td class="num dbar ${dirCls(v)}" style="--w:${Math.min(1, Math.abs(v) / T.barMax).toFixed(3)}">${cell(v, T.types[i])}</td>`;
       return `<td class="num ${T.varCols?.includes(i) ? dirCls(v) : ''}">${cell(v, T.types[i])}</td>`;
     }).join('')}</tr>`;
     const body = T.rows.length ? T.rows.map(row).join('') : `<tr><td colspan="${T.head.length}" class="muted">Sin datos para estos filtros.</td></tr>`;
@@ -1036,7 +1038,7 @@
     bar('full', 'chartYearsFull', 'y2');
   }
 
-  const COL_PARAISO = '#1baf7a', COL_COMP = '#8a93a3';
+  const COL_PARAISO = '#3D6BFF', COL_COMP = '#B4B9D3';
   function renderGroupChart(F, R) {
     $('#groupLegend').innerHTML = `<span><i class="swatch" style="background:${COL_PARAISO}"></i>Venta Paraíso</span><span><i class="swatch" style="background:${COL_COMP}"></i>Venta Competencia</span>`;
     const ds = (label, field, color) => ({ label, data: F.years.map((y) => R.byYear.get(y)[field].ytd), backgroundColor: color, borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: 0.7, barPercentage: 0.9 });
@@ -1182,7 +1184,7 @@
     renderTable('tblCmpSoles', cmpAOA('v'));
     $('#cmpUndCard').hidden = !hasUnits;
     if (hasUnits) renderTable('tblCmpUnd', cmpAOA('u'));
-    $('#cmpByTitle').textContent = LABELS[by][by === 'tienda' ? 1 : 0];
+    $('#cmpByTitle').textContent = LABELS[by][by === 'tienda' ? 1 : 0].toLowerCase();
 
     // Detalle por semana: columnas Sem-N × año, como la tabla dinámica de Excel.
     const weeks = (cmp.weeks.size ? [...cmp.weeks] : [...new Set(work.filter((r) => r.w > 0).map((r) => r.w))]).sort((a, b) => a - b);
@@ -1203,7 +1205,7 @@
     }
 
     const ms = [...cmp.months].sort((a, b) => a - b).map((m) => MESES_LARGO[m - 1]);
-    $('#cmpTitle').textContent = cmp.months.size === 1 && [...cmp.months][0] === C.m && yB === C.y ? 'MES ACTUAL' : (ms.join(' + ') || 'TODO EL AÑO').toUpperCase();
+    $('#cmpTitle').textContent = cmp.months.size === 1 && [...cmp.months][0] === C.m && yB === C.y ? 'mes actual' : (ms.length ? ms.join(' y ').toLowerCase() : 'año completo');
     const dsel = [...cmp.days].sort((a, b) => a - b);
     const dTxt = !dsel.length ? 'todos los días' : dsel.length > 2 && dsel[dsel.length - 1] - dsel[0] + 1 === dsel.length ? `días ${dsel[0]} al ${dsel[dsel.length - 1]}` : `días ${dsel.join(', ')}`;
     $('#cmpNote').innerHTML = `Comparando <b>${yB}</b> contra <b>${yA}</b> · ${ms.length ? ms.join(', ') : 'todos los meses'} · ${cmp.weeks.size ? 'semanas ' + [...cmp.weeks].sort((a, b) => a - b).join(', ') : 'todas las semanas'} · ${dTxt}${noDay ? ' · <span class="down">los archivos no traen fecha diaria</span>' : ''}`;
@@ -1276,7 +1278,7 @@
 
   function renderWeekChart(canvasId, key, weeks, years, sums, yA, yB, fmt) {
     const legend = years.map((y) => `<span><i class="swatch" style="background:${yearColor(y)}"></i>${y}</span>`).join('') + `<span><i class="swatch" style="background:#0f7b3d"></i>Var % ${yB} vs ${yA}</span>`;
-    $('#' + canvasId).closest('.card').querySelector('[data-legend]').innerHTML = legend;
+    $('#' + canvasId).closest('.panel, .card').querySelector('[data-legend]').innerHTML = legend;
     const vars = weeks.map((w) => varPct(sums.get(yB * 100 + w) || 0, sums.get(yA * 100 + w) || 0));
     const short = (v) => (fmt === money ? 'S/ ' + fmtNum0.format(v) : fmtNum0.format(v));
     upsertChart(key, canvasId, {
@@ -1302,7 +1304,8 @@
     const head = [...labels, `${yA} ${unit}`, `${yB} ${unit}`, field === 'v' ? 'Var S/' : 'Var Und', 'Var %'];
     const rows = list.filter((g) => g[A] || g[B]).map((g) => [...g.cols, g[A], g[B], g[B] - g[A], varPct(g[B], g[A])]);
     const sa = rows.reduce((s, r) => s + r[nl], 0), sb = rows.reduce((s, r) => s + r[nl + 1], 0);
-    return { head, rows, foot: [['Total general', ...Array(nl - 1).fill(''), sa, sb, sb - sa, varPct(sb, sa)]], types: [...labels.map(() => 't'), t, t, t, '%'], varCols: [nl + 2, nl + 3] };
+    const barMax = Math.max(0, ...rows.map((r) => Math.abs(r[nl + 3] ?? 0)).filter(Number.isFinite));
+    return { head, rows, foot: [['Total general', ...Array(nl - 1).fill(''), sa, sb, sb - sa, varPct(sb, sa)]], types: [...labels.map(() => 't'), t, t, t, '%'], varCols: [nl + 2, nl + 3], bar: nl + 3, barMax };
   }
 
   // ---------------------------------------------------------------- análisis del Vs (texto automático)
@@ -1357,7 +1360,173 @@
     }
     cmp.analysis = out.map((h) => h.replace(/<[^>]+>/g, ''));
     $('#cmpAnalysis').innerHTML = out.map((h) => `<li>${h}</li>`).join('');
+    renderHero({ A, B, uA, uB, d, p, hasUnits });
+    renderInsights({ up, down, list, B, d, uA, uB, A, hasUnits, name, what });
+    renderBridge({ list, A, B, name, what });
+    renderDiverge({ list, name });
   }
+
+  // ---------------------------------------------------------------- presentación (hero, tarjetas, gráficos)
+  const WHAT_ONE = { cadena: 'cadena', marca: 'marca', tipo: 'grupo', tienda: 'tienda', coordinador: 'coordinador' };
+
+  // Frase natural del período: "Del 1 al 21 de noviembre de 2026", "En octubre y noviembre de 2026"…
+  function periodLabel(year) {
+    const ms = [...cmp.months].sort((a, b) => a - b).map((m) => MESES_LARGO[m - 1].toLowerCase());
+    const ds = [...cmp.days].sort((a, b) => a - b);
+    const mtxt = ms.length ? (ms.length === 1 ? ms[0] : ms.slice(0, -1).join(', ') + ' y ' + ms[ms.length - 1]) : null;
+    const contiguous = ds.length > 1 && ds[ds.length - 1] - ds[0] + 1 === ds.length;
+    let t;
+    if (mtxt && contiguous) t = `Del ${ds[0]} al ${ds[ds.length - 1]} de ${mtxt} de ${year}`;
+    else if (mtxt && ds.length === 1) t = `El ${ds[0]} de ${mtxt} de ${year}`;
+    else if (mtxt && ds.length) t = `En ${ds.length} días de ${mtxt} de ${year}`;
+    else if (mtxt) t = `En ${mtxt} de ${year}`;
+    else t = `En ${year}`;
+    if (cmp.weeks.size) t += ` (semanas ${[...cmp.weeks].sort((a, b) => a - b).join(', ')})`;
+    return t;
+  }
+
+  function renderHero({ A, B, uA, uB, d, p, hasUnits }) {
+    const { yA, yB } = cmp.last;
+    const per = periodLabel(yB);
+    const cls = d >= 0 ? 'up' : 'down';
+    $('#cmpHeadline').innerHTML = `${esc(per)} vendimos <span class="amount">${moneyShort(B)}</span>, <span class="delta ${cls}">${p == null ? 'sin base' : (p > 0 ? '+' : '') + (p * 100).toFixed(1) + '%'}</span> <span class="vs">frente a ${yA}</span>`;
+    const pu = varPct(uB, uA);
+    const tA = uA ? A / uA : null, tB = uB ? B / uB : null;
+    const foot = (x, extra = '') => (x == null ? extra : `<span class="${dirCls(x)}">${x > 0 ? '▲' : x < 0 ? '▼' : ''} ${pct(x)}</span> vs ${yA}${extra}`);
+    const tiles = [
+      [`Venta ${yB}`, moneyShort(B), `${moneyShort(A)} en ${yA}`],
+      ['Diferencia', `${d > 0 ? '+' : ''}${moneyShort(d)}`, foot(p)],
+    ];
+    if (hasUnits && (uA || uB)) {
+      tiles.push([`Unidades ${yB}`, num(uB), foot(pu)]);
+      tiles.push(['Precio promedio', tB ? money(tB) : '—', foot(tA && tB ? varPct(tB, tA) : null)]);
+    } else {
+      const sp = cmp.shareP;
+      tiles.push(['Participación Paraíso', sp?.b != null ? fmtPct.format(sp.b) : '—', sp?.a != null && sp?.b != null ? `<span class="${dirCls(sp.b - sp.a)}">${(sp.b - sp.a > 0 ? '+' : '') + ((sp.b - sp.a) * 100).toFixed(1)} pp</span> vs ${yA}` : '']);
+      tiles.push([`${cmp.last.list.filter((g) => g.vB).length} con venta`, `${cmp.last.list.filter((g) => g.vB > g.vA).length} crecen`, `${cmp.last.list.filter((g) => g.vB < g.vA).length} caen`]);
+    }
+    $('#cmpKpis').innerHTML = tiles.map(([l, v, f]) => `<div class="hk"><div class="hk-label">${l}</div><div class="hk-value">${v}</div><div class="hk-foot">${f}</div></div>`).join('');
+    $$('[data-ya]').forEach((e) => (e.textContent = yA));
+    $$('[data-yb]').forEach((e) => (e.textContent = yB));
+    $$('[data-what]').forEach((e) => (e.textContent = WHAT_ONE[cmp.last.by]));
+  }
+
+  function renderInsights({ up, down, list, B, d, uA, uB, A, hasUnits, name, what }) {
+    const card = (kind, icon, title, nm, value, note) => `<article class="ins ${kind}"><div class="ins-top"><span class="ins-icon" aria-hidden="true">${icon}</span>${title}</div><div class="ins-name">${nm}</div><div class="ins-value">${value}</div><div class="ins-note">${note}</div></article>`;
+    const cards = [];
+    const contrib = (x) => (d && Math.abs(x.d / d) <= 1 ? `explica el ${fmtPct.format(Math.abs(x.d / d))} de la diferencia` : 'mueve más que la diferencia total');
+    cards.push(up.length
+      ? card('up', '▲', 'Lo que más suma', esc(name(up[0].g)), `+${moneyShort(up[0].d)}`, up[0].g.vA ? `${pct(varPct(up[0].g.vB, up[0].g.vA))} · ${contrib(up[0])}` : `Nueva en ${cmp.last.yB}`)
+      : card('up', '▲', 'Lo que más suma', 'Nadie crece', '—', 'Todos bajan o se mantienen'));
+    cards.push(down.length
+      ? card('down', '▼', 'Lo que más resta', esc(name(down[0].g)), moneyShort(down[0].d), down[0].g.vB ? `${pct(varPct(down[0].g.vB, down[0].g.vA))} · ${contrib(down[0])}` : `Sin venta en ${cmp.last.yB}`)
+      : card('down', '▼', 'Lo que más resta', 'Nadie cae', '—', 'Todos suben o se mantienen'));
+    const top = [...list].sort((a, b) => b.vB - a.vB)[0];
+    if (top && B) cards.push(card('weight', '★', 'Mayor peso', esc(name(top)), fmtPct.format(top.vB / B), `de la venta de ${cmp.last.yB} · ${moneyShort(top.vB)}`));
+    if (hasUnits && uA && uB) {
+      const pu = varPct(uB, uA), pp = varPct(B / uB, A / uA);
+      const byPrice = Math.abs(pp) > Math.abs(pu);
+      cards.push(card('mix', '⚖', 'Qué explica la diferencia', byPrice ? 'Más el precio que el volumen' : 'Más el volumen que el precio', `${pct(byPrice ? pp : pu)}`, `Unidades ${pct(pu)} · precio promedio ${pct(pp)}`));
+    } else if (cmp.shareP?.a != null && cmp.shareP?.b != null) {
+      const dd = cmp.shareP.b - cmp.shareP.a;
+      cards.push(card('mix', '⚖', 'Participación Paraíso', `${fmtPct.format(cmp.shareP.b)} de la venta`, `${dd > 0 ? '+' : ''}${(dd * 100).toFixed(1)} pp`, `frente a ${fmtPct.format(cmp.shareP.a)} en ${cmp.last.yA}`));
+    }
+    $('#cmpInsights').innerHTML = cards.join('');
+  }
+
+  // Puente: venta del año base → aportes de cada grupo → venta del año comparado.
+  function renderBridge({ list, A, B, name }) {
+    const { yA, yB } = cmp.last;
+    const moved = list.map((g) => ({ label: name(g), d: g.vB - g.vA })).filter((x) => x.d);
+    moved.sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+    const top = moved.slice(0, 7);
+    const rest = moved.slice(7).reduce((s, x) => s + x.d, 0);
+    if (Math.abs(rest) > 0.5) top.push({ label: `Otros (${moved.length - 7})`, d: rest });
+    top.sort((a, b) => b.d - a.d);
+    const labels = [String(yA), ...top.map((x) => x.label), String(yB)];
+    let cum = A;
+    const bars = [[0, A]], colors = [yearColor(yA)], deltas = [null];
+    for (const x of top) { bars.push([cum, cum + x.d]); colors.push(x.d >= 0 ? '#14B88A' : '#F0475A'); deltas.push(x.d); cum += x.d; }
+    bars.push([0, B]); colors.push(yearColor(yB)); deltas.push(null);
+    const lo = Math.min(...bars.slice(1, -1).flat(), A, B), hi = Math.max(...bars.flat());
+    const pad = (hi - lo) * 0.25 || hi * 0.05;
+    const short = (s) => (s.length > 16 ? s.slice(0, 15) + '…' : s);
+    upsertChart('bridge', 'chartBridge', {
+      type: 'bar',
+      data: { labels: labels.map(short), datasets: [{ data: bars, backgroundColor: colors, borderRadius: 6, borderSkipped: false, barPercentage: 0.72 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+        layout: { padding: { top: 24 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { title: (it) => labels[it[0].dataIndex], label: (c) => { const dv = deltas[c.dataIndex]; return dv == null ? ` ${money(bars[c.dataIndex][1])}` : ` ${signMoney(dv)}`; } } },
+          bridgeLabels: { deltas, bars },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 40, minRotation: 0, autoSkip: false, font: { size: 11 } } },
+          y: { min: Math.max(0, lo - pad), grid: { color: '#EEF0F6' }, border: { display: false }, ticks: { callback: (v) => moneyShort(v) } },
+        },
+      },
+      plugins: [bridgeLabels],
+    });
+  }
+  const bridgeLabels = {
+    id: 'bridgeLabels',
+    afterDatasetsDraw(chart, _a, o) {
+      const { ctx } = chart;
+      ctx.save();
+      ctx.font = '700 11px "Plus Jakarta Sans", system-ui, sans-serif'; ctx.textAlign = 'center';
+      chart.getDatasetMeta(0).data.forEach((bar, i) => {
+        const dv = o.deltas[i];
+        const txt = dv == null ? moneyShort(o.bars[i][1]) : (dv > 0 ? '+' : '') + moneyShort(dv);
+        const top = Math.min(bar.y, bar.base);
+        ctx.fillStyle = dv == null ? '#161A3A' : dv >= 0 ? '#0E8F6B' : '#D42E43';
+        ctx.fillText(txt, bar.x, top - 6);
+      });
+      ctx.restore();
+    },
+  };
+
+  // Variación % simétrica alrededor de cero (verde a la derecha, rosa a la izquierda).
+  function renderDiverge({ list, name }) {
+    let items = list.filter((g) => g.vA > 0).map((g) => ({ label: name(g), p: varPct(g.vB, g.vA), d: g.vB - g.vA }));
+    items.sort((a, b) => b.p - a.p);
+    if (items.length > 12) items = [...items.slice(0, 6), ...items.slice(-6)];
+    const m = Math.max(0.05, ...items.map((x) => Math.abs(x.p))) * 1.18;
+    const short = (s) => (s.length > 22 ? s.slice(0, 21) + '…' : s);
+    upsertChart('diverge', 'chartDiverge', {
+      type: 'bar',
+      data: { labels: items.map((x) => short(x.label)), datasets: [{ data: items.map((x) => x.p * 100), backgroundColor: items.map((x) => (x.p >= 0 ? '#14B88A' : '#F0475A')), borderRadius: 6, borderSkipped: false, barPercentage: 0.7 }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { title: (it) => items[it[0].dataIndex].label, label: (c) => ` ${pct(items[c.dataIndex].p)} · ${signMoney(items[c.dataIndex].d)}` } },
+          divLabels: { items },
+        },
+        scales: {
+          x: { min: -m * 100, max: m * 100, grid: { color: (c) => (c.tick.value === 0 ? '#161A3A' : '#EEF0F6'), lineWidth: (c) => (c.tick.value === 0 ? 1.5 : 1) }, border: { display: false }, ticks: { callback: (v) => (v > 0 ? '+' : '') + Math.round(v) + '%' } },
+          y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 11.5 } } },
+        },
+      },
+      plugins: [divLabels],
+    });
+  }
+  const divLabels = {
+    id: 'divLabels',
+    afterDatasetsDraw(chart, _a, o) {
+      const { ctx } = chart;
+      ctx.save();
+      ctx.font = '700 11px "Plus Jakarta Sans", system-ui, sans-serif'; ctx.textBaseline = 'middle';
+      chart.getDatasetMeta(0).data.forEach((bar, i) => {
+        const p = o.items[i].p;
+        ctx.fillStyle = p >= 0 ? '#0E8F6B' : '#D42E43';
+        ctx.textAlign = p >= 0 ? 'left' : 'right';
+        ctx.fillText(pct(p), bar.x + (p >= 0 ? 6 : -6), bar.y);
+      });
+      ctx.restore();
+    },
+  };
 
   // ---------------------------------------------------------------- copiar / exportar
   function aoaFor(id) {
@@ -1426,6 +1595,7 @@
   }
 
   function init() {
+    if (window.Chart) { Chart.defaults.font.family = '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif'; Chart.defaults.color = '#4A5072'; }
     if (!window.XLSX) { document.body.innerHTML = '<p style="padding:40px">No se pudo cargar el lector de Excel. Revisa tu conexión y recarga la página.</p>'; return; }
     $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
     $('#btnGoCompare').addEventListener('click', () => setView('anual'));

@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Reporte Vs Anual</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -121,61 +124,88 @@
 
     <!-- ============ COMPARATIVA ============ -->
     <section id="view-comparativa" class="view" data-analysis>
-      <h2 class="cmp-title">COMPARATIVAS <span id="cmpTitle">MES ACTUAL</span></h2>
       <p class="server-status" id="cmpStatus" hidden></p>
-      <div class="empty-state" id="cmpEmpty" hidden>Todavía no hay detalle diario en la base. Vuelve a subir los archivos para habilitar la comparativa por mes, semana y día.</div>
-      <div class="cmp-layout" id="cmpContent">
-        <aside class="card slicers">
-          <div class="slicer">
-            <div class="slicer-head"><b>Años</b></div>
-            <div class="years-pick"><select id="cmpYearA"></select><span>vs</span><select id="cmpYearB"></select></div>
-          </div>
-          <div class="slicer">
-            <div class="slicer-head"><b>MES</b><button class="icon-btn" data-clear="months" title="Borrar filtro">✕</button></div>
-            <div class="chips" id="slMes"></div>
-          </div>
-          <div class="slicer" id="slSemWrap">
-            <div class="slicer-head"><b>Semanas</b><button class="icon-btn" data-clear="weeks" title="Borrar filtro">✕</button></div>
-            <div class="chips two" id="slSem"></div>
-          </div>
-          <div class="slicer" id="slDiaWrap">
-            <div class="slicer-head"><b>Día</b><button class="icon-btn" data-clear="days" title="Borrar filtro">✕</button></div>
-            <div class="chips days" id="slDia"></div>
-          </div>
-          <label class="multi"><input type="checkbox" id="cmpMulti"> Selección múltiple (o Ctrl + clic)</label>
-          <button class="btn" id="cmpToCut">Mes de corte hasta el día de corte</button>
-        </aside>
-        <div class="cmp-main">
-          <div class="filters card cmp-by">
-            <div class="f"><label>Ver por</label>
-              <select id="cmpBy"><option value="cadena">Cadena</option><option value="tienda">Tienda</option><option value="coordinador">Coordinador</option><option value="marca">Marca</option><option value="tipo">Paraíso vs Competencia</option></select>
+      <div class="empty-state" id="cmpEmpty" hidden>Todavía no hay detalle diario en la base. Sube los archivos en Datos para ver la comparativa por mes, semana y día.</div>
+      <div id="cmpContent">
+        <header class="hero">
+          <div class="hero-head">
+            <div class="hero-copy">
+              <p class="hero-kicker">Comparativa del <span id="cmpTitle">mes actual</span></p>
+              <h2 class="hero-line" id="cmpHeadline"></h2>
+              <p class="hero-sub" id="cmpNote"></p>
             </div>
-            <p class="period-note" id="cmpNote"></p>
+            <label class="hero-by">Ver por
+              <select id="cmpBy"><option value="cadena">Cadena</option><option value="tienda">Tienda</option><option value="coordinador">Coordinador</option><option value="marca">Marca</option><option value="tipo">Paraíso vs Competencia</option></select>
+            </label>
           </div>
-          <div class="card analysis-card">
-            <div class="card-head"><h2>Análisis del Vs</h2></div>
-            <ul class="analysis" id="cmpAnalysis"></ul>
-          </div>
-          <div class="server-status" id="cmpNoStore" hidden>La comparativa por tienda y por coordinador necesita volver a subir los archivos (se agregó el detalle diario por tienda y la columna Coordinador).</div>
-          <div class="card">
-            <div class="card-head"><h2>Soles por <span id="cmpByTitle">Cadena</span></h2><div class="actions"><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div></div>
-            <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
-          </div>
-          <div class="card" id="cmpUndCard">
-            <div class="card-head"><h2>Unidades</h2><div class="actions"><button class="btn" data-copy="cmpUnd">Copiar tabla</button></div></div>
-            <div class="table-wrap"><table id="tblCmpUnd" class="tbl cmp"></table></div>
-          </div>
-          <div class="card" id="cmpWeekCard">
-            <div class="card-head"><h2>Soles por semana</h2><div class="actions"><button class="btn" data-copy="cmpWeek">Copiar tabla</button></div></div>
-            <div class="table-wrap"><table id="tblCmpWeek" class="tbl cmp wk"></table></div>
-            <div class="card-head" style="margin-top:16px"><h2>Soles por semana y año</h2><span class="legend" data-legend></span></div>
-            <div class="chart-box tall"><canvas id="chartCmpWeek" role="img" aria-label="Soles por semana y año"></canvas></div>
-          </div>
-          <div class="card" id="cmpWeekUndCard">
-            <div class="card-head"><h2>Unidades por semana</h2><div class="actions"><button class="btn" data-copy="cmpWeekUnd">Copiar tabla</button></div></div>
-            <div class="table-wrap"><table id="tblCmpWeekUnd" class="tbl cmp wk"></table></div>
-            <div class="card-head" style="margin-top:16px"><h2>Unidades por semana y año</h2><span class="legend" data-legend></span></div>
-            <div class="chart-box tall"><canvas id="chartCmpWeekUnd" role="img" aria-label="Unidades por semana y año"></canvas></div>
+          <div class="hero-kpis" id="cmpKpis"></div>
+        </header>
+
+        <div class="cmp-layout">
+          <aside class="slicers">
+            <div class="slicer">
+              <div class="slicer-head"><b>Años</b></div>
+              <div class="years-pick"><select id="cmpYearA" aria-label="Año base"></select><span>vs</span><select id="cmpYearB" aria-label="Año a comparar"></select></div>
+            </div>
+            <div class="slicer">
+              <div class="slicer-head"><b>Mes</b><button class="icon-btn" data-clear="months" title="Quitar filtro de mes">Limpiar</button></div>
+              <div class="chips" id="slMes"></div>
+            </div>
+            <div class="slicer" id="slSemWrap">
+              <div class="slicer-head"><b>Semanas</b><button class="icon-btn" data-clear="weeks" title="Quitar filtro de semana">Limpiar</button></div>
+              <div class="chips two" id="slSem"></div>
+            </div>
+            <div class="slicer" id="slDiaWrap">
+              <div class="slicer-head"><b>Día</b><button class="icon-btn" data-clear="days" title="Quitar filtro de día">Limpiar</button></div>
+              <div class="chips days" id="slDia"></div>
+            </div>
+            <label class="multi"><input type="checkbox" id="cmpMulti"> Elegir varios (o Ctrl + clic)</label>
+            <button class="btn btn-ghost-dark" id="cmpToCut">Volver al mes de corte</button>
+          </aside>
+
+          <div class="cmp-main">
+            <div class="server-status" id="cmpNoStore" hidden>Para comparar por tienda o por coordinador, vuelve a subir los archivos: así se guarda el detalle diario por tienda y el coordinador.</div>
+
+            <section class="insights" id="cmpInsights" aria-label="Lo más importante"></section>
+
+            <div class="pair">
+              <article class="panel">
+                <h3>Cómo se llega de <span data-ya></span> a <span data-yb></span></h3>
+                <p class="panel-sub">Cada barra muestra cuánto suma o resta cada <span data-what></span> a la venta.</p>
+                <div class="chart-box sym"><canvas id="chartBridge" role="img" aria-label="Puente de la variación de ventas"></canvas></div>
+              </article>
+              <article class="panel">
+                <h3>Quién crece y quién cae</h3>
+                <p class="panel-sub">Variación % de <span data-yb></span> frente a <span data-ya></span>, ordenada de mayor a menor.</p>
+                <div class="chart-box sym"><canvas id="chartDiverge" role="img" aria-label="Variación porcentual por grupo"></canvas></div>
+              </article>
+            </div>
+
+            <details class="panel analysis-more">
+              <summary>Ver el análisis completo</summary>
+              <ul class="analysis" id="cmpAnalysis"></ul>
+            </details>
+
+            <article class="panel">
+              <div class="panel-head"><h3>Soles por <span id="cmpByTitle">cadena</span></h3><button class="btn" data-copy="cmpSoles">Copiar tabla</button></div>
+              <div class="table-wrap"><table id="tblCmpSoles" class="tbl cmp"></table></div>
+            </article>
+            <article class="panel" id="cmpUndCard">
+              <div class="panel-head"><h3>Unidades</h3><button class="btn" data-copy="cmpUnd">Copiar tabla</button></div>
+              <div class="table-wrap"><table id="tblCmpUnd" class="tbl cmp"></table></div>
+            </article>
+            <article class="panel" id="cmpWeekCard">
+              <div class="panel-head"><h3>Soles por semana</h3><span class="legend" data-legend></span></div>
+              <div class="chart-box tall"><canvas id="chartCmpWeek" role="img" aria-label="Soles por semana y año"></canvas></div>
+              <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeek">Copiar tabla</button></div>
+              <div class="table-wrap"><table id="tblCmpWeek" class="tbl cmp wk"></table></div>
+            </article>
+            <article class="panel" id="cmpWeekUndCard">
+              <div class="panel-head"><h3>Unidades por semana</h3><span class="legend" data-legend></span></div>
+              <div class="chart-box tall"><canvas id="chartCmpWeekUnd" role="img" aria-label="Unidades por semana y año"></canvas></div>
+              <div class="panel-head sub"><h4>Detalle semanal</h4><button class="btn" data-copy="cmpWeekUnd">Copiar tabla</button></div>
+              <div class="table-wrap"><table id="tblCmpWeekUnd" class="tbl cmp wk"></table></div>
+            </article>
           </div>
         </div>
       </div>
