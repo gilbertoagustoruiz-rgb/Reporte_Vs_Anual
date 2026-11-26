@@ -1462,28 +1462,35 @@
 
   async function genMail() {
     const C = cutInfo(), Y = C.y, P = Y - 1;
-    const per = 'month'; // el correo compara siempre el mes en curso con el mismo mes del año anterior
     const chain = $('#mlChain').value, secs = mailSecs();
     const years = state.years.filter((y) => y <= C.y);
-    const recs = state.records.filter((r) => r.y <= C.y && (!chain || r.cadena === chain));
-    const F = { C, from: years[0], years, chain, brand: '', tipo: '', cob: 'all', showShare: state.hasBrand, recs };
-    const R = compute(F);
-    const cur = R.byYear.get(Y), prev = R.byYear.get(P);
-    if (!cur) { $('#mlBody').innerHTML = '<p style="padding:28px">No hay ventas para esta selección.</p>'; return; }
+    const recsAll = state.records.filter((r) => r.y <= C.y && (!chain || r.cadena === chain));
     const wkBoth = C.hasW && state.weekYears.has(Y) && state.weekYears.has(P);
-    const mes = C.monthLabel.toLowerCase();
-    const perTxt = per === 'week' ? `semana ${C.w}` : per === 'month' ? `mes de ${mes}${C.d ? ` (hasta el ${C.d})` : ''}` : (C.hasW && state.weekYears.has(Y) ? `acumulado de la semana 1 a la ${C.w}` : `acumulado de enero a ${mes}`);
-    const perShort = per === 'week' ? `Semana ${C.w}` : per === 'month' ? C.monthLabel : 'Acumulado';
+    const MES = C.monthLabel.toLowerCase();
+    const daysInMonth = new Date(Y, C.m, 0).getDate();
 
-    // Coordinadores: se piden al servidor con el mismo período (año anterior hasta la misma semana).
-    let coord = null;
-    {
-      const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
-      const body = { anios: [P, Y], por: 'coordinador', cadena: chain || undefined };
-      if (per === 'week') body.semanas = [C.w];
-      else if (per === 'month') { body.meses = [C.m]; if (wkBoth) body.semanas = upTo(C.w); }
-      else if (wkBoth) body.semanas = upTo(C.w); else body.meses = upTo(C.m);
+    // Venta Paraíso y Venta Competencia se calculan SIEMPRE por separado (nunca se suman en un total).
+    const GROUPS = state.hasBrand
+      ? [{ k: 'paraiso', name: 'Venta Paraíso', short: 'Paraíso' }, { k: 'competencia', name: 'Venta Competencia', short: 'Competencia' }]
+      : [{ k: null, name: 'Venta', short: 'Venta' }];
+    const marcasDe = (k) => [...new Set(state.records.filter((r) => r.tipo === k).map((r) => r.marca))];
+    const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
+    for (const g of GROUPS) {
+      const recs = g.k ? recsAll.filter((r) => r.tipo === g.k) : recsAll;
+      const R = compute({ C, from: years[0], years, chain, brand: '', tipo: g.k || '', cob: 'all', showShare: false, recs });
+      g.R = R;
+      const cur = R.byYear.get(Y), prev = R.byYear.get(P);
+      g.B = cur?.month || 0; g.A = prev?.month || 0; g.d = g.B - g.A; g.p = g.A ? varPct(g.B, g.A) : null;
+      g.wB = cur?.week || 0; g.wA = prev?.week || 0;
+      g.fullMonthP = R.byYM.get(P * 100 + C.m) || 0;
+      g.chains = [...R.byChain.values()].map((o) => ({ n: o.cadena, a: o.y[P]?.month || 0, b: o.y[Y]?.month || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a }));
+      g.stores = [...R.byStore.values()].map((o) => ({ n: o.tienda, c: o.cadena, a: o.y[P]?.month || 0, b: o.y[Y]?.month || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a }));
+      // Coordinadores del mismo grupo de marcas (año anterior hasta la misma semana).
+      g.coord = [];
       try {
+        const body = { anios: [P, Y], por: 'coordinador', cadena: chain || undefined, meses: [C.m] };
+        if (wkBoth) body.semanas = upTo(C.w);
+        if (g.k) body.marcas = marcasDe(g.k);
         const r = await api('/api/comparativa', { method: 'POST', body });
         const m = new Map();
         for (const x of r.rows) {
@@ -1492,76 +1499,15 @@
           if (x.anio === Y) o.b += x.v; else o.a += x.v;
           m.set(x.coordinador, o);
         }
-        coord = [...m.values()].filter((o) => o.a || o.b).sort((x, y) => y.b - x.b);
-      } catch { coord = null; }
+        g.coord = [...m.values()].filter((o) => o.a || o.b).sort((x, y) => y.b - x.b);
+      } catch { /* sin coordinadores */ }
     }
+    const M = GROUPS[0], CP = GROUPS[1] || null; // M = Paraíso (foco del correo), CP = Competencia
+    if (!M.B && !M.A && !(CP && (CP.B || CP.A))) { $('#mlBody').innerHTML = '<div style="padding:28px">No hay ventas del mes para esta selección.</div>'; return; }
 
-    const v = (o) => (o ? o[per] || 0 : 0);
-    const A = v(prev), B = v(cur), d = B - A, p = prev ? varPct(B, A) : null;
-    const pA = prev ? prev.p[per] : 0, pB = cur.p[per], cA = prev ? prev.c[per] : 0, cB = cur.c[per];
-    const shA = pA + cA ? pA / (pA + cA) : null, shB = pB + cB ? pB / (pB + cB) : null;
-    const chains = [...R.byChain.values()].map((o) => ({ n: o.cadena, a: o.y[P]?.[per] || 0, b: o.y[Y]?.[per] || 0, pb: o.yp[Y]?.[per] || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a })).sort((x, y) => y.b - x.b);
-    const stores = [...R.byStore.values()].map((o) => ({ n: o.tienda, c: o.cadena, a: o.y[P]?.[per] || 0, b: o.y[Y]?.[per] || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a }));
-    const up = stores.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), down = stores.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
-    const nuevas = stores.filter((x) => !x.a && x.b).length, perdidas = stores.filter((x) => x.a && !x.b).length;
-    const months = [];
-    for (let m = 1; m <= C.m; m++) {
-      const a = m === C.m ? prev?.month || 0 : R.byYM.get(P * 100 + m) || 0, b = m === C.m ? cur.month : R.byYM.get(Y * 100 + m) || 0;
-      if (a || b) months.push({ m, n: MESES_LARGO[m - 1] + (m === C.m ? ' (al corte)' : ''), a, b, p: varPct(b, a) });
-    }
-
-    // ---------- estilos de texto del análisis (en línea: Gmail y Outlook los respetan)
-    const FONT = 'font-family:Segoe UI,Arial,Helvetica,sans-serif;';
-    const GOOD = '#0E7A5C', BAD = '#C0283A', MUTED = '#6B7086';
-    const col = (x) => (x > 0 ? GOOD : x < 0 ? BAD : MUTED);
-    const strong = (x, t) => `<span style="color:${col(x)};font-weight:700">${t}</span>`;
-    const pctC = (x) => (x == null || !isFinite(x) ? '—' : strong(x, pct(x)));
-    const ppC = (x) => strong(x, ppTxt(x));
-    const moneyC = (x) => strong(x, signMoney(x));
-    const share = (x) => (x == null ? '—' : fmtPct.format(x));
-    const T0 = `role="presentation" cellpadding="0" cellspacing="0" border="0"`;
-    // ---------- análisis
-    const pts = [];
-    pts.push(`<b>Resultado:</b> en el ${perTxt} de ${Y} vendimos ${money(B)}${p == null ? '.' : `, ${pctC(p)} frente a ${P} (${moneyC(d)}).`}${per !== 'week' && wkBoth ? ` Para comparar parejo, ${P} se cuenta hasta la misma semana.` : ''}`);
-    if (state.hasBrand && shB != null) pts.push(`<b>Paraíso vs competencia:</b> la venta Paraíso ${pA ? `va ${pctC(varPct(pB, pA))}` : `suma ${money(pB)}`} y la competencia ${cA ? `va ${pctC(varPct(cB, cA))}` : `suma ${money(cB)}`}. La participación Paraíso ${shA != null ? `pasa de ${share(shA)} a ${share(shB)} (${ppC(shB - shA)})` : `es ${share(shB)}`}.`);
-    const cu = chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), cd = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
-    if (!chain && chains.length > 1) pts.push(`<b>Cadenas:</b> ${cu.length} de ${chains.length} crecen.` + (cu[0] ? ` La que más suma es ${esc(cu[0].n)} (${moneyC(cu[0].d)}${cu[0].a ? `, ${pctC(varPct(cu[0].b, cu[0].a))}` : ''}).` : '') + (cd[0] ? ` La que más resta es ${esc(cd[0].n)} (${moneyC(cd[0].d)}, ${pctC(varPct(cd[0].b, cd[0].a))}).` : ''));
-    if (stores.length) pts.push(`<b>Tiendas:</b> ${up.length} crecen y ${down.length} caen${nuevas || perdidas ? `; ${nuevas} venden solo en ${Y} y ${perdidas} vendieron en ${P} pero no en ${Y}` : ''}.` + (up[0] ? ` La que más sube es ${esc(up[0].n)} (${esc(up[0].c)}, ${moneyC(up[0].d)}).` : '') + (down[0] ? ` La que más baja es ${esc(down[0].n)} (${esc(down[0].c)}, ${moneyC(down[0].d)}).` : ''));
-    const cv = (coord || []).filter((o) => o.a > 0).map((o) => ({ ...o, p: varPct(o.b, o.a) }));
-    if (cv.length > 1) {
-      const best = cv.reduce((m, x) => (x.p > m.p ? x : m)), worst = cv.reduce((m, x) => (x.p < m.p ? x : m));
-      pts.push(`<b>Coordinadores:</b> ${cv.filter((x) => x.p > 0).length} de ${cv.length} crecen. La mejor variación es de ${esc(best.n)} (${pctC(best.p)}) y la más baja de ${esc(worst.n)} (${pctC(worst.p)}).`);
-    }
-    const mv = months.filter((x) => x.p != null);
-    const bestM = mv.length > 1 ? mv.reduce((m, x) => (x.p > m.p ? x : m)) : null, worstM = mv.length > 1 ? mv.reduce((m, x) => (x.p < m.p ? x : m)) : null;
-    if (per === 'ytd' && bestM) pts.push(`<b>Meses:</b> el mejor mes frente a ${P} fue ${bestM.n.toLowerCase()} (${pctC(bestM.p)}) y el más flojo ${worstM.n.toLowerCase()} (${pctC(worstM.p)}).`);
-
-    // Ritmo y proyección (con el acumulado al corte, sea cual sea el período elegido).
-    const ytdA = prev?.ytd || 0, ytdB = cur.ytd, fullA = prev?.full || 0;
-    const proj = ytdA > 0 && fullA > 0 ? ytdB * (fullA / ytdA) : null;
-    const avance = fullA > 0 ? ytdB / fullA : null;
-    // Última semana frente a la misma semana del año anterior.
-    const lastW = C.hasW ? { a: prev?.week || 0, b: cur.week, open: !!C.d && new Date(C.y, C.m - 1, C.d).getDay() !== 0 } : null;
-    // Foco: acciones sugeridas a partir de los datos.
-    const foco = [];
-    if (cd[0] && !chain) {
-      const sd = stores.filter((x) => x.c === cd[0].n && x.d < 0).sort((a, b) => a.d - b.d)[0];
-      foco.push(['🎯', `Recuperar ${esc(cd[0].n)}`, `Cae ${money(Math.abs(cd[0].d))} (${pct(varPct(cd[0].b, cd[0].a))}).${sd ? ` ${esc(sd.n)} explica ${fmtPct.format(Math.min(1, sd.d / cd[0].d))} de esa caída.` : ''}`]);
-    }
-    if (up[0]) foco.push(['🚀', `Replicar ${esc(up[0].n)}`, `Es la tienda que más crece: ${signMoney(up[0].d)}${up[0].a ? ` (${pct(varPct(up[0].b, up[0].a))})` : ''}. Vale la pena ver qué está haciendo distinto.`]);
-    if (state.hasBrand && shA != null && shB != null) foco.push(shB >= shA
-      ? ['🛡️', 'Sostener la ganancia de participación', `Paraíso pasa de ${share(shA)} a ${share(shB)} (${ppTxt(shB - shA)}) frente a la competencia.`]
-      : ['⚠️', 'La competencia gana terreno', `La participación Paraíso baja de ${share(shA)} a ${share(shB)} (${ppTxt(shB - shA)}).`]);
-    if (lastW && lastW.a > 0) { const pw = varPct(lastW.b, lastW.a); foco.push(pw >= 0 ? ['📈', `La semana ${C.w} viene fuerte`, `${pct(pw)} frente a la misma semana de ${P}: buen impulso para el cierre.`] : ['🔎', `Ojo con la semana ${C.w}`, `${pct(pw)} frente a la misma semana de ${P}.${lastW.open ? ' La semana todavía está en curso, así que puede mejorar.' : ' Conviene revisar qué pasó.'}`]); }
-    if (perdidas) foco.push(['📍', `${perdidas} ${perdidas === 1 ? 'tienda sin venta' : 'tiendas sin venta'} este año`, `Vendían en ${P} y en ${Y} no registran venta. Revisar cobertura o exhibición.`]);
-
-    // ---------- correo en texto simple, como lo escribiría una persona (mes en curso vs el mismo mes del año anterior)
-    mail.images = [];
-    const MES = C.monthLabel.toLowerCase();
-    // Nombres en mayúsculas → "Plaza Vea", "San Isidro".
+    // ---------- redacción
     const nice = (s) => String(s || '').toLowerCase().replace(/(^|[\s\-/(.])([a-záéíóúñü])/g, (m, a, b) => a + b.toUpperCase())
       .replace(/ (De|Del|La|Las|Los|Y|E|En|El)(?= )/g, (w) => w.toLowerCase());
-    // Montos como se escriben a mano: "S/ 30.5 millones", "S/ 410 mil".
     const soles = (v) => {
       const a = Math.abs(v || 0);
       if (a >= 1e6) { const m = Math.round(a / 1e5) / 10; return `S/ ${m.toLocaleString('es-PE', { maximumFractionDigits: 1 })} ${m === 1 ? 'millón' : 'millones'}`; }
@@ -1570,130 +1516,138 @@
     };
     const pc = (x) => (x == null || !isFinite(x) ? '' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1)}%`);
     const pcAbs = (x) => `${Math.abs(x * 100).toFixed(1)}%`;
+    const pctOf = (x) => (x == null ? '—' : fmtPct.format(x));
     const corte = C.d ? `al ${C.d} de ${MES}` : `a la semana ${C.w} de ${MES}`;
     const rango = C.d ? `del 1 al ${C.d} de ${MES}` : `${MES} hasta la semana ${C.w}`;
-    const cuantos = (n, total, uno, varios, verbo1, verboN) => (n === 0 ? `ningun${uno === 'tienda' || uno === 'cadena' ? 'a' : 'o'} ${uno} ${verbo1}` : n === total && total > 1 ? `${total === 2 ? 'las dos' : `las ${total}`} ${varios} ${verboN}`.replace(/^las (\S+) (coordinadores)/, 'los $1 $2') : `${n} de ${total} ${n === 1 ? verbo1 : verboN}`);
-    const per1 = `${MES} ${Y}`, per0 = `${MES} ${P}`;
-    const para = [];
-    const lines = []; // versión en texto plano (para el Excel)
+    const per0 = `${MES} ${P}`;
+    const lastOpen = !!C.d && new Date(C.y, C.m - 1, C.d).getDay() !== 0;
+    const enCadena = chain ? ` en ${nice(chain)}` : '';
+    const G = '#1E7D32', Rr = '#C62828';
+    // **negrita**, ⟦+texto⟧ verde, ⟦-texto⟧ rojo (se convierten después de escapar).
+    const fmtHtml = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/⟦\+(.+?)⟧/g, `<b style="color:${G}">$1</b>`).replace(/⟦-(.+?)⟧/g, `<b style="color:${Rr}">$1</b>`);
+    const plainTxt = (x) => x.replace(/\*\*(.+?)\*\*/g, '$1').replace(/⟦[+-](.+?)⟧/g, '$1');
+    const signed = (x) => (x == null ? '' : x >= 0 ? `⟦+${pc(x)}⟧` : `⟦-${pc(x)}⟧`);
+    const vsLine = (g) => g.A
+      ? `**${g.name}:** ${soles(g.B)}, frente a ${soles(g.A)} de ${per0} al mismo corte (${signed(g.p)}; ${soles(g.d)} ${g.d >= 0 ? 'más' : 'menos'}).`
+      : `**${g.name}:** ${soles(g.B)} en el mes (sin venta en ${per0} para comparar).`;
 
-    // 1. Resultado del mes
-    let t;
-    if (!prev || !A) t = `Les comparto cómo vamos en ventas ${corte}${chain ? ` en ${nice(chain)}` : ''}. Llevamos ${soles(B)} vendidos en el mes.`;
-    else t = `Les comparto cómo vamos en ventas ${corte}${chain ? ` en ${nice(chain)}` : ''}. En el mes llevamos ${soles(B)} vendidos, ${pcAbs(p)} ${d >= 0 ? 'más' : 'menos'} que en ${per0} al mismo corte (${soles(A)}); es decir, ${soles(d)} ${d >= 0 ? 'más' : 'menos'}.`;
-    para.push(t); lines.push(t);
-    if (lastW && lastW.a > 0) {
-      const pw = varPct(lastW.b, lastW.a);
-      t = `La semana ${C.w}${lastW.open ? ', que todavía está en curso,' : ''} va ${pcAbs(pw)} ${pw >= 0 ? 'arriba' : 'abajo'} de la misma semana del año pasado.`;
-      para.push(t); lines.push(t);
+    const hook = M.p == null ? `${C.monthLabel} arrancó y ${M.k ? 'Paraíso' : 'la venta'} ya lleva **${soles(M.B)}**${enCadena}.`
+      : M.p >= 0.05 ? `¡Buenas noticias! ${C.monthLabel} viene fuerte para ${M.k ? 'Paraíso' : 'nosotros'}${enCadena}: vamos ⟦+${pcAbs(M.p)} arriba⟧ del año pasado.`
+      : M.p >= 0 ? `${C.monthLabel} va por buen camino para ${M.k ? 'Paraíso' : 'nosotros'}${enCadena}: estamos ⟦+${pcAbs(M.p)} arriba⟧ del año pasado.`
+      : M.p > -0.05 ? `${C.monthLabel} viene ⟦-${pcAbs(M.p)} abajo⟧ del año pasado para ${M.k ? 'Paraíso' : 'nosotros'}${enCadena}, pero todavía estamos a tiempo de darle la vuelta.`
+      : `${C.monthLabel} viene complicado para ${M.k ? 'Paraíso' : 'nosotros'}${enCadena}: estamos ⟦-${pcAbs(M.p)} abajo⟧ del año pasado y necesitamos acelerar en lo que queda del mes.`;
+
+    const intro = `Les comparto el avance de ventas ${corte}${enCadena}${CP ? ', con Venta Paraíso y Venta Competencia por separado' : ''}:`;
+    const resumen = [vsLine(M)];
+    if (CP && secs.has('paraiso')) {
+      resumen.push(vsLine(CP));
+      const sA = M.A + CP.A ? M.A / (M.A + CP.A) : null, sB = M.B + CP.B ? M.B / (M.B + CP.B) : null;
+      if (sA != null && sB != null) resumen.push(`**Participación Paraíso:** pasa de ${pctOf(sA)} a ${pctOf(sB)} (${sB >= sA ? '⟦+' : '⟦-'}${((sB - sA) >= 0 ? '+' : '') + ((sB - sA) * 100).toFixed(1)} pp⟧).`);
+      M.shA = sA; M.shB = sB;
     }
-    // 2. Paraíso vs competencia
-    if (secs.has('paraiso') && state.hasBrand && shB != null && pA && cA) {
-      const gp = varPct(pB, pA), gc = varPct(cB, cA);
-      t = `Paraíso ${gp >= 0 ? 'crece' : 'cae'} ${pcAbs(gp)} y la competencia ${gc >= 0 ? 'crece' : 'cae'} ${pcAbs(gc)}, así que nuestra participación ${shB > shA ? 'sube' : shB < shA ? 'baja' : 'se mantiene'} de ${share(shA)} a ${share(shB)}.`;
-      para.push(t); lines.push(t);
+    const para = [];
+    if (C.hasW && M.wA > 0) {
+      const pw = varPct(M.wB, M.wA);
+      para.push(`En la semana ${C.w}${lastOpen ? ', que todavía está en curso,' : ''} la ${M.name} va ${pcAbs(pw)} ${pw >= 0 ? 'arriba' : 'abajo'} de la misma semana del año pasado.`);
     }
-    // 3. Cadenas
-    if (secs.has('cadenas') && !chain && chains.length > 1) {
-      const cu2 = chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), cd2 = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+    // Cadenas
+    const cadenasTxt = (g) => {
+      const cu = g.chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), cd = g.chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
       const fmt = (x) => `${nice(x.n)} (${x.d >= 0 ? '+' : '-'}${soles(x.d)}${x.a ? `, ${pc(varPct(x.b, x.a))}` : ''})`;
-      t = `Por cadena, ${cu2.length ? cuantos(cu2.length, chains.length, 'cadena', 'cadenas', 'crece', 'crecen') : 'ninguna crece'}.`;
-      if (cu2.length) t += ` El mayor aporte viene de ${fmt(cu2[0])}${cu2[1] ? ` y ${fmt(cu2[1])}` : ''}.`;
-      if (cd2.length) t += ` ${cu2.length ? 'En cambio, ' : cd2.length > 1 ? 'Las que más bajan son ' : 'La que más baja es '}${cu2.length ? '' : ''}${fmt(cd2[0])}${cd2[1] ? ` y ${fmt(cd2[1])}` : ''}${cu2.length ? ` ${cd2.length > 1 ? 'son las que más bajan' : 'es la que más baja'}` : ''}.`;
-      para.push(t); lines.push(t);
+      let t = `En ${g.name}, ${cu.length === 0 ? 'ninguna cadena crece' : cu.length === g.chains.length ? 'todas las cadenas crecen' : `${cu.length} de ${g.chains.length} cadenas crecen`}.`;
+      if (cu.length) t += ` El mayor aporte viene de ${fmt(cu[0])}${cu[1] ? ` y ${fmt(cu[1])}` : ''}.`;
+      if (cd.length) t += ` ${cu.length ? 'En cambio, ' : ''}${fmt(cd[0])}${cd[1] ? ` y ${fmt(cd[1])}` : ''} ${cd.length > 1 ? 'son las que más bajan' : 'es la que más baja'}.`;
+      return t;
+    };
+    if (secs.has('cadenas') && !chain && M.chains.length > 1) para.push(cadenasTxt(M));
+    if (secs.has('cadenas') && !chain && CP && secs.has('paraiso') && CP.chains.length > 1) {
+      const cu = CP.chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d);
+      if (cu[0]) para.push(`En Venta Competencia, la cadena donde más crece es ${nice(cu[0].n)} (+${soles(cu[0].d)}${cu[0].a ? `, ${pc(varPct(cu[0].b, cu[0].a))}` : ''}).`);
     }
-    // 4. Tiendas
-    if (secs.has('tiendas') && stores.length) {
-      t = `En tiendas, ${up.length === 0 ? 'ninguna crece' : `${up.length} ${up.length === 1 ? 'crece' : 'crecen'}`} y ${down.length === 0 ? 'ninguna cae' : `${down.length} ${down.length === 1 ? 'cae' : 'caen'}`} frente a ${per0}.`;
+    // Tiendas (Paraíso)
+    const up = M.stores.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), down = M.stores.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+    const perdidas = M.stores.filter((x) => x.a && !x.b).length;
+    if (secs.has('tiendas') && M.stores.length) {
+      let t = `Por tienda (${M.name}), ${up.length === 0 ? 'ninguna crece' : `${up.length} ${up.length === 1 ? 'crece' : 'crecen'}`} y ${down.length === 0 ? 'ninguna cae' : `${down.length} ${down.length === 1 ? 'cae' : 'caen'}`} frente a ${per0}.`;
       if (up[0]) t += ` La que más sube es ${nice(up[0].n)} de ${nice(up[0].c)} (+${soles(up[0].d)})`;
       if (down[0]) t += `${up[0] ? ' y la que más baja' : ' La que más baja es'} ${nice(down[0].n)} de ${nice(down[0].c)} (-${soles(down[0].d)})`;
       if (up[0] || down[0]) t += '.';
-      if (perdidas) t += ` Hay ${perdidas} ${perdidas === 1 ? 'tienda que vendió' : 'tiendas que vendieron'} en ${per0} y este mes todavía no ${perdidas === 1 ? 'registra' : 'registran'} venta.`;
-      para.push(t); lines.push(t);
+      if (perdidas) t += ` Hay ${perdidas} ${perdidas === 1 ? 'tienda que vendió' : 'tiendas que vendieron'} Paraíso en ${per0} y este mes todavía no ${perdidas === 1 ? 'registra' : 'registran'} venta.`;
+      para.push(t);
     }
-    // 5. Coordinadores
-    const cv2 = (coord || []).filter((o) => o.a > 0).map((o) => ({ ...o, p: varPct(o.b, o.a) }));
-    if (secs.has('coord') && cv2.length > 1) {
-      const best = cv2.reduce((m, x) => (x.p > m.p ? x : m)), worst = cv2.reduce((m, x) => (x.p < m.p ? x : m));
-      const nUp = cv2.filter((x) => x.p > 0).length;
-      t = `Por coordinador, ${nUp === 0 ? 'ninguno va' : nUp === cv2.length ? 'todos van' : `${nUp} de ${cv2.length} ${nUp === 1 ? 'va' : 'van'}`} por encima del año pasado. ${best.p >= 0 ? `${nice(best.n)} tiene el mejor resultado (${pc(best.p)})` : `${nice(best.n)} tiene la caída más leve (${pc(best.p)})`} y ${nice(worst.n)} ${worst.p >= 0 ? 'el crecimiento más bajo' : 'la caída más fuerte'} (${pc(worst.p)}).`;
-      para.push(t); lines.push(t);
+    // Coordinadores (Paraíso)
+    const cv = M.coord.filter((o) => o.a > 0).map((o) => ({ ...o, p: varPct(o.b, o.a) }));
+    if (secs.has('coord') && cv.length > 1) {
+      const best = cv.reduce((m, x) => (x.p > m.p ? x : m)), worst = cv.reduce((m, x) => (x.p < m.p ? x : m));
+      const nUp = cv.filter((x) => x.p > 0).length;
+      para.push(`Por coordinador (${M.name}), ${nUp === 0 ? 'ninguno va' : nUp === cv.length ? 'todos van' : `${nUp} de ${cv.length} ${nUp === 1 ? 'va' : 'van'}`} por encima del año pasado. ${best.p >= 0 ? `${nice(best.n)} tiene el mejor resultado (${pc(best.p)})` : `${nice(best.n)} tiene la caída más leve (${pc(best.p)})`} y ${nice(worst.n)} ${worst.p >= 0 ? 'el crecimiento más bajo' : 'la caída más fuerte'} (${pc(worst.p)}).`);
     }
-    // 6. Puntos a revisar
+    // Lo que falta para superar el mes del año pasado (Paraíso).
+    let falta = '';
+    if (C.d && C.d < daysInMonth && M.fullMonthP > M.B) falta = `Quedan ${daysInMonth - C.d} días del mes. Para superar la ${M.name} de ${per0} completo (${soles(M.fullMonthP)}) nos faltan **${soles(M.fullMonthP - M.B)}**, unos **${soles((M.fullMonthP - M.B) / (daysInMonth - C.d))} por día**. ¡Vamos por ello!`;
+    else if (M.fullMonthP && M.B >= M.fullMonthP) falta = `La ${M.name} ya superó todo lo que se vendió en ${per0} (${soles(M.fullMonthP)}). ¡Todo lo que venga ahora es récord!`;
+    // Puntos a revisar
     const revisar = [];
     if (secs.has('foco')) {
-      const cd2 = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
-      if (cd2[0] && !chain) {
-        const sd = stores.filter((x) => x.c === cd2[0].n && x.d < 0).sort((a, b) => a.d - b.d)[0];
-        revisar.push(`${nice(cd2[0].n)}: cae ${soles(cd2[0].d)}${sd ? `; ${nice(sd.n)} explica ${Math.round(Math.min(1, sd.d / cd2[0].d) * 100)}% de esa caída` : ''}.`);
-      } else if (down[0]) revisar.push(`${nice(down[0].n)}: es la tienda que más baja (-${soles(down[0].d)}).`);
-      if (up[0]) revisar.push(`${nice(up[0].n)}: es la que más crece; vale la pena ver qué está haciendo distinto para replicarlo.`);
-      if (state.hasBrand && shA != null && shB != null && shB < shA) revisar.push(`Participación: Paraíso pierde ${((shA - shB) * 100).toFixed(1)} puntos frente a la competencia este mes.`);
-      if (lastW && lastW.a > 0 && lastW.b < lastW.a && !lastW.open) revisar.push(`Semana ${C.w}: quedó por debajo de la misma semana del año pasado.`);
-      if (perdidas) revisar.push(`Tiendas sin venta este mes: ${perdidas}. Revisar cobertura o exhibición.`);
+      const cd = M.chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+      if (cd[0] && !chain) {
+        const sd = M.stores.filter((x) => x.c === cd[0].n && x.d < 0).sort((a, b) => a.d - b.d)[0];
+        revisar.push(`${nice(cd[0].n)}: la ${M.name} cae ${soles(cd[0].d)}${sd ? `; ${nice(sd.n)} explica ${Math.round(Math.min(1, sd.d / cd[0].d) * 100)}% de esa caída` : ''}.`);
+      } else if (down[0]) revisar.push(`${nice(down[0].n)}: es la tienda donde más baja la ${M.name} (-${soles(down[0].d)}).`);
+      if (CP) {
+        // Cadena donde la competencia crece mientras Paraíso cae: la alerta más útil para el coordinador.
+        const alert = M.chains.map((x) => { const c2 = CP.chains.find((y) => y.n === x.n); return { n: x.n, pp: varPct(x.b, x.a), pc2: c2 && c2.a ? varPct(c2.b, c2.a) : null }; })
+          .filter((x) => x.pp != null && x.pc2 != null && x.pp < 0 && x.pc2 > 0).sort((a, b) => (b.pc2 - b.pp) - (a.pc2 - a.pp))[0];
+        if (alert && !chain) revisar.push(`${nice(alert.n)}: la competencia crece ${pc(alert.pc2)} mientras Paraíso cae ${pc(alert.pp)}. Revisar exhibición y precios frente a la competencia.`);
+      }
+      if (up[0]) revisar.push(`${nice(up[0].n)}: es la tienda donde más crece Paraíso; vale la pena ver qué está haciendo distinto para replicarlo.`);
+      if (perdidas) revisar.push(`${perdidas} ${perdidas === 1 ? 'tienda sin' : 'tiendas sin'} venta Paraíso este mes. Revisar cobertura o exhibición.`);
     }
 
-    // Tabla sencilla, como pegada de Excel.
+    // Tabla tipo Excel: Paraíso y Competencia en columnas separadas, cada una con su propio total.
     let tabla = '';
     if (secs.has('tabla')) {
-      const src = chain ? [...stores].sort((a, b) => b.b - a.b) : chains;
-      const top = src.slice(0, 15);
-      const TA = src.reduce((s2, x) => s2 + x.a, 0), TB = src.reduce((s2, x) => s2 + x.b, 0);
-      const td = (v2, right, bold) => `<td style="border:1px solid #bfbfbf;padding:3px 8px;${right ? 'text-align:right;' : ''}${bold ? 'font-weight:bold;' : ''}white-space:nowrap">${v2}</td>`;
-      const nf = (v2) => Math.round(v2).toLocaleString('es-PE');
-      tabla = `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#000;margin:4px 0 14px">
-        <tr style="background:#f2f2f2">${td(`<b>${chain ? 'Tienda' : 'Cadena'}</b>`)}${td(`<b>${C.monthLabel} ${P}</b>`, true)}${td(`<b>${C.monthLabel} ${Y}</b>`, true)}${td('<b>Var %</b>', true)}</tr>
-        ${top.map((x) => `<tr>${td(esc(nice(x.n)))}${td(nf(x.a), true)}${td(nf(x.b), true)}${td(x.a ? pc(varPct(x.b, x.a)) : 'nueva', true)}</tr>`).join('')}
-        <tr>${td('Total', false, true)}${td(nf(TA), true, true)}${td(nf(TB), true, true)}${td(pc(varPct(TB, TA)), true, true)}</tr></table>`;
+      const keyOf = (x) => (chain ? x.c + '|' + x.n : x.n);
+      const listOf = (g) => (chain ? g.stores : g.chains);
+      const names = new Map();
+      for (const g of GROUPS) for (const x of listOf(g)) if (!names.has(keyOf(x))) names.set(keyOf(x), x.n);
+      const get = (g, k) => listOf(g).find((x) => keyOf(x) === k) || { a: 0, b: 0 };
+      const rowsT = [...names.keys()].map((k) => ({ k, n: names.get(k), vals: GROUPS.map((g) => get(g, k)) })).sort((a, b) => b.vals[0].b - a.vals[0].b);
+      const top = rowsT.slice(0, 15);
+      const td = (v2, right, bold, extra = '') => `<td style="border:1px solid #bfbfbf;padding:3px 8px;${right ? 'text-align:right;' : ''}${bold ? 'font-weight:bold;' : ''}white-space:nowrap;${extra}">${v2}</td>`;
+      const nf = (v2) => (v2 ? Math.round(v2).toLocaleString('es-PE') : '-');
+      const vp = (a, b) => (a ? pc(varPct(b, a)) : b ? 'nueva' : '-');
+      const head1 = `<tr style="background:#f2f2f2">${td('', false, true)}${GROUPS.map((g, i) => `<td colspan="3" style="border:1px solid #bfbfbf;padding:3px 8px;text-align:center;font-weight:bold;background:${i ? '#f2f2f2' : '#fde9d9'}">${g.name}</td>`).join('')}</tr>`;
+      const head2 = `<tr style="background:#f2f2f2">${td(`<b>${chain ? 'Tienda' : 'Cadena'}</b>`)}${GROUPS.map(() => `${td(`<b>${C.monthLabel.slice(0, 3)} ${P}</b>`, true)}${td(`<b>${C.monthLabel.slice(0, 3)} ${Y}</b>`, true)}${td('<b>Var %</b>', true)}`).join('')}</tr>`;
+      const body = top.map((r) => `<tr>${td(esc(nice(r.n)))}${r.vals.map((x) => `${td(nf(x.a), true)}${td(nf(x.b), true)}${td(vp(x.a, x.b), true)}`).join('')}</tr>`).join('');
+      const tot = GROUPS.map((g) => ({ a: listOf(g).reduce((s2, x) => s2 + x.a, 0), b: listOf(g).reduce((s2, x) => s2 + x.b, 0) }));
+      const foot = `<tr>${td('Total', false, true)}${tot.map((x) => `${td(nf(x.a), true, true)}${td(nf(x.b), true, true)}${td(vp(x.a, x.b), true, true)}`).join('')}</tr>`;
+      tabla = `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#000;margin:4px 0 14px">${CP ? head1 : ''}${head2}${body}${foot}</table>`;
     }
 
-    // ---------- toque de marketing: frase de arranque, cifras en negrita, lo que falta y dos gráficos simples
-    const G = '#1E7D32', Rr = '#C62828';
-    // Marcas dentro del texto: **negrita**, ⟦+texto⟧ verde, ⟦-texto⟧ rojo (se convierten después de escapar).
-    const fmtHtml = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/⟦\+(.+?)⟧/g, `<b style="color:${G}">$1</b>`).replace(/⟦-(.+?)⟧/g, `<b style="color:${Rr}">$1</b>`);
-    const plainTxt = (x) => x.replace(/\*\*(.+?)\*\*/g, '$1').replace(/⟦[+-](.+?)⟧/g, '$1');
-    const hook = p == null ? `${C.monthLabel} arrancó y ya llevamos **${soles(B)}**.`
-      : p >= 0.05 ? `¡Buenas noticias! ${C.monthLabel} viene fuerte: vamos ⟦+${pcAbs(p)} arriba⟧ del año pasado.`
-      : p >= 0 ? `${C.monthLabel} va por buen camino: estamos ⟦+${pcAbs(p)} arriba⟧ del año pasado.`
-      : p > -0.05 ? `${C.monthLabel} viene ⟦-${pcAbs(p)} abajo⟧ del año pasado, pero todavía estamos a tiempo de darle la vuelta.`
-      : `${C.monthLabel} viene complicado: estamos ⟦-${pcAbs(p)} abajo⟧ del año pasado y necesitamos acelerar en lo que queda del mes.`;
-    if (p != null) para[0] = `${C.d ? `Al ${C.d} de ${MES}` : `A la semana ${C.w}`} llevamos **${soles(B)}** vendidos${chain ? ` en ${nice(chain)}` : ''}, frente a ${soles(A)} del mismo corte de ${per0}: ${d >= 0 ? `**${soles(d)} más**` : `**${soles(d)} menos**`}.`;
-    else para[0] = para[0].replace(`Llevamos ${soles(B)}`, `Llevamos **${soles(B)}**`);
-    lines[0] = para[0];
-    // Lo que falta: días que quedan y cuánto se vendió el año pasado en el mes completo.
-    const fullMonthP = R.byYM.get(P * 100 + C.m) || 0;
-    const daysInMonth = new Date(Y, C.m, 0).getDate();
-    let falta = '';
-    if (C.d && C.d < daysInMonth && fullMonthP > B) {
-      falta = `Quedan ${daysInMonth - C.d} días del mes. Para superar ${per0} completo (${soles(fullMonthP)}) nos faltan **${soles(fullMonthP - B)}**, unos **${soles((fullMonthP - B) / (daysInMonth - C.d))} por día**. ¡Vamos por ello!`;
-    } else if (fullMonthP && B >= fullMonthP) {
-      falta = `Ya superamos todo lo que se vendió en ${per0} (${soles(fullMonthP)}). ¡Todo lo que venga ahora es récord!`;
-    }
-
-    // Gráficos (solo si el envío los admite; si no, se quitan al enviar).
+    // Gráficos de la Venta Paraíso (solo si el envío los admite; si no, se quitan al enviar).
     const charts = [];
     if (secs.has('graficos')) {
       const C1 = '#2F5BEA', C0 = '#A3A9C2';
-      // 1) Venta acumulada del mes día a día, con el detalle diario.
       try {
-        const daily = (await loadCmp()).filter((r) => r.m === C.m && (r.y === Y || r.y === P) && r.d > 0 && (!chain || r.cadena === chain));
+        const daily = (await loadCmp()).filter((r) => r.m === C.m && (r.y === Y || r.y === P) && r.d > 0 && (!chain || r.cadena === chain) && (!M.k || r.tipo === M.k));
         if (daily.some((r) => r.y === Y)) {
           const sum = (y) => { const a2 = new Array(daysInMonth).fill(0); for (const r of daily) if (r.y === y && r.d <= daysInMonth) a2[r.d - 1] += r.v; return a2; };
           const dY = sum(Y), dP = sum(P);
           let s1 = 0, s0 = 0;
-          const accY = dY.map((v2, i) => (i < (C.d || daysInMonth) ? (s1 += v2) : null)), accP = dP.map((v2) => (s0 += v2));
-          charts.push({ cid: 'mes', title: `Venta acumulada de ${MES}, día a día`,
+          const last = C.d || daysInMonth;
+          const accY = dY.map((v2, i) => (i < last ? (s1 += v2) : null)), accP = dP.map((v2) => (s0 += v2));
+          charts.push({ cid: 'mes', title: `${M.name} acumulada de ${MES}, día a día`,
             src: await chartImage({ type: 'line', data: { labels: dY.map((_, i) => String(i + 1)), datasets: [
               { label: String(P), data: accP, borderColor: C0, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, tension: .2 },
-              { label: String(Y), data: accY, borderColor: C1, backgroundColor: 'rgba(47,91,234,.10)', fill: 'origin', borderWidth: 3, pointRadius: accY.map((v2, i) => (i === (C.d || daysInMonth) - 1 ? 5 : 0)), pointBackgroundColor: C1, tension: .2 },
+              { label: String(Y), data: accY, borderColor: C1, backgroundColor: 'rgba(47,91,234,.10)', fill: 'origin', borderWidth: 3, pointRadius: accY.map((v2, i) => (i === last - 1 ? 5 : 0)), pointBackgroundColor: C1, tension: .2 },
             ] } }, { height: 230, legend: true }) });
         }
       } catch { /* sin detalle diario */ }
-      // 2) Venta del mes por cadena (o por tienda si se eligió una cadena).
-      const srcB = (chain ? [...stores] : [...chains]).sort((a, b) => b.b - a.b).slice(0, 7);
+      const srcB = (chain ? [...M.stores] : [...M.chains]).sort((a, b) => b.b - a.b).slice(0, 7);
       if (srcB.length) {
         const lab = (s2) => { const n = nice(s2); return n.length > 14 ? n.slice(0, 13) + '…' : n; };
-        charts.push({ cid: 'cadenas', title: `${C.monthLabel} ${P} vs ${C.monthLabel} ${Y} por ${chain ? 'tienda' : 'cadena'} (${rango})`,
+        charts.push({ cid: 'cadenas', title: `${M.name} por ${chain ? 'tienda' : 'cadena'}: ${per0} vs ${MES} ${Y} (${rango})`,
           src: await chartImage({ type: 'bar', data: { labels: srcB.map((x) => lab(x.n)), datasets: [
             { label: String(P), data: srcB.map((x) => x.a), backgroundColor: C0, borderRadius: 3, barPercentage: .85, categoryPercentage: .7 },
             { label: String(Y), data: srcB.map((x) => x.b), backgroundColor: C1, borderRadius: 3, barPercentage: .85, categoryPercentage: .7 },
@@ -1707,37 +1661,49 @@
     const html = [
       P_('Hola equipo,'),
       P_(fmtHtml(hook)),
+      P_(esc(intro)) + `<ul style="margin:0 0 12px;padding-left:22px">${resumen.map((r) => `<li style="margin:0 0 4px">${fmtHtml(r)}</li>`).join('')}</ul>`,
       ...para.map((x) => P_(fmtHtml(x))),
       charts[0] ? chartHtml(charts[0]) : '',
       falta ? P_(fmtHtml(falta)) : '',
       tabla ? P_(`Este es el resumen por ${chain ? 'tienda' : 'cadena'} (montos en soles, ${rango} en ambos años):`) + tabla : '',
       charts[1] ? chartHtml(charts[1]) : '',
       revisar.length ? `<div style="margin:0 0 4px"><b>Puntos a revisar:</b></div><ul style="margin:0 0 12px;padding-left:22px">${revisar.map((r) => `<li style="margin:0 0 4px">${esc(r)}</li>`).join('')}</ul>` : '',
-      $('#mlAttach').checked ? P_(`Adjunto el Excel con el detalle por cadena, tienda y coordinador.`) : '',
+      $('#mlAttach').checked ? P_(`Adjunto el Excel con el detalle por cadena, tienda y coordinador${CP ? ', con Venta Paraíso y Venta Competencia por separado' : ''}.`) : '',
       P_(`Saludos,<br>${esc(session.user?.nombre || '')}`),
     ].filter(Boolean).join('\n');
     $('#mlBody').innerHTML = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;padding:24px 26px">${html}</div>`;
-    pts.length = 0; pts.push(plainTxt(hook), ...lines.map(plainTxt), ...(falta ? [plainTxt(falta)] : []), ...revisar.map((r) => 'Revisar: ' + r));
 
     // Asunto por defecto (si el administrador no lo cambió a mano).
-    const subj = `Avance ${C.monthLabel.toLowerCase()} ${Y} vs ${C.monthLabel.toLowerCase()} ${P}${C.d ? ` (al ${String(C.d).padStart(2, '0')}/${String(C.m).padStart(2, '0')})` : ''}${chain ? ` - ${chain.charAt(0) + chain.slice(1).toLowerCase()}` : ''}`;
+    const subj = `Avance ${MES} ${Y} vs ${per0}${C.d ? ` (al ${String(C.d).padStart(2, '0')}/${String(C.m).padStart(2, '0')})` : ''}${chain ? ` - ${nice(chain)}` : ''}`;
     if (!mail.subjEdited) $('#mlSubject').value = subj;
 
-    // Excel adjunto con las mismas cifras.
-    const plain = (h) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-    const sheets = [{ name: 'Análisis', title: `Análisis · ${perShort} ${Y} vs ${P}`, lines: pts.map(plain) }];
-    const kp = [[`Venta (${perShort.toLowerCase()})`, A, B], ['Venta Paraíso', pA, pB], ['Venta Competencia', cA, cB]].filter((r, i) => i === 0 || state.hasBrand);
-    sheets.push({ name: 'Indicadores', title: 'Indicadores clave', T: { head: ['Indicador', String(P), String(Y), 'Var S/', 'Var %'], rows: kp.map(([l, a, b]) => [l, a, b, b - a, varPct(b, a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
-    if (!chain && chains.length) sheets.push({ name: 'Cadenas', title: 'Por cadena', T: { head: ['Cadena', String(P), String(Y), 'Var S/', 'Var %'], rows: chains.map((x) => [x.n, x.a, x.b, x.d, varPct(x.b, x.a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
-    if (stores.length) sheets.push({ name: 'Tiendas', title: 'Tiendas ordenadas por diferencia', T: { head: ['Cadena', 'Tienda', String(P), String(Y), 'Var S/', 'Var %'], rows: [...stores].sort((a, b) => b.d - a.d).map((x) => [x.c, x.n, x.a, x.b, x.d, varPct(x.b, x.a)]), foot: [], types: ['t', 't', '$', '$', '$', '%'] } });
-    if (coord?.length) sheets.push({ name: 'Coordinadores', title: 'Por coordinador', T: { head: ['Coordinador', String(P), String(Y), 'Var S/', 'Var %'], rows: coord.map((o) => [o.n, o.a, o.b, o.b - o.a, varPct(o.b, o.a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
-    if (months.length) sheets.push({ name: 'Mes a mes', title: `Mes a mes ${Y} vs ${P}`, T: { head: ['Mes', String(P), String(Y), 'Var S/', 'Var %'], rows: months.map((x) => [x.n, x.a, x.b, x.b - x.a, x.p]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    // Excel adjunto: cada grupo en sus propias columnas, nunca sumados.
+    const lines = [hook, intro, ...resumen, ...para, ...(falta ? [falta] : []), ...revisar.map((r) => 'Revisar: ' + r)].map(plainTxt);
+    const sheets = [{ name: 'Análisis', title: `Análisis ${MES} ${Y} vs ${per0} (${rango})`, lines }];
+    const headG = (first) => [...first, ...GROUPS.flatMap((g) => [`${g.short} ${P}`, `${g.short} ${Y}`, `${g.short} Var S/`, `${g.short} Var %`])];
+    const typesG = (n) => [...Array(n).fill('t'), ...GROUPS.flatMap(() => ['$', '$', '$', '%'])];
+    const valsG = (xs) => xs.flatMap((x) => [x.a, x.b, x.b - x.a, varPct(x.b, x.a)]);
+    sheets.push({ name: 'Resumen', title: `Resumen ${MES} (${rango})`, T: { head: ['Grupo', String(P), String(Y), 'Var S/', 'Var %'], rows: GROUPS.map((g) => [g.name, g.A, g.B, g.d, varPct(g.B, g.A)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    const mergeBy = (key, listOf, first) => {
+      const m = new Map();
+      GROUPS.forEach((g, gi) => listOf(g).forEach((x) => { const k = key(x); if (!m.has(k)) m.set(k, { first: first(x), v: GROUPS.map(() => ({ a: 0, b: 0 })) }); m.get(k).v[gi] = { a: x.a, b: x.b }; }));
+      return [...m.values()].sort((a, b) => b.v[0].b - a.v[0].b);
+    };
+    if (!chain) {
+      const rowsC = mergeBy((x) => x.n, (g) => g.chains, (x) => [x.n]);
+      sheets.push({ name: 'Cadenas', title: 'Por cadena', T: { head: headG(['Cadena']), rows: rowsC.map((r) => [...r.first, ...valsG(r.v)]), foot: [], types: typesG(1) } });
+    }
+    const rowsS = mergeBy((x) => x.c + '|' + x.n, (g) => g.stores, (x) => [x.c, x.n]);
+    if (rowsS.length) sheets.push({ name: 'Tiendas', title: 'Por tienda', T: { head: headG(['Cadena', 'Tienda']), rows: rowsS.map((r) => [...r.first, ...valsG(r.v)]), foot: [], types: typesG(2) } });
+    const rowsK = mergeBy((x) => x.n, (g) => g.coord, (x) => [x.n]);
+    if (rowsK.length) sheets.push({ name: 'Coordinadores', title: 'Por coordinador', T: { head: headG(['Coordinador']), rows: rowsK.map((r) => [...r.first, ...valsG(r.v)]), foot: [], types: typesG(1) } });
     mail.sheets = sheets;
-    mail.sub = `Análisis ${perShort.toLowerCase()} · Corte ${C.dateText}${C.hasW ? ` (semana ${C.w})` : ''}${chain ? ` · Cadena ${chain}` : ''}`;
+    mail.sub = `${C.monthLabel} ${Y} vs ${per0} · ${rango}${chain ? ` · Cadena ${chain}` : ''}`;
     mail.key = mailKey(); mail.edited = false;
     store.set('mailDraft', null);
     setMailState(); syncMailMeta();
   }
+
 
   // ---- envío
   function renderMailFrom() {
