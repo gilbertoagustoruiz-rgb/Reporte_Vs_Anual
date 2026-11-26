@@ -492,7 +492,7 @@
     session.token = s ? s.token : null;
     session.user = s ? s.user : null;
     store.set('token', session.token); store.set('user', session.user);
-    if (!s && was) location.reload(); // borra de la pantalla los datos del usuario anterior
+    if (!s && was) { store.set('acc', ''); location.reload(); } // borra de la pantalla los datos del usuario anterior
     renderSession();
   }
 
@@ -522,16 +522,35 @@
   const accText = (a) => (a.tipo === 'coordinador' ? `tiendas de ${a.valor}` : a.tipo === 'cadena' ? `toda la cadena ${a.valor}` : `tienda ${a.valor.split('|')[1]} (${a.valor.split('|')[0]})`);
   const accesosText = (list) => { const t = list.map(accText); return t.length <= 1 ? t.join('') : t.slice(0, -1).join(', ') + ' y ' + t[t.length - 1]; };
 
+  // Acceso elegido por el usuario ('' = todos sus accesos juntos). Se recuerda en este navegador.
+  state.acc = store.get('acc', '');
+  const accKey = (a) => `${a.tipo}:${a.valor}`;
+  const accQuery = () => (state.acc ? `?acc=${encodeURIComponent(state.acc)}` : '');
+  const accShort = (a) => (a.tipo === 'coordinador' ? `Mis tiendas · ${a.valor}` : a.tipo === 'cadena' ? `Cadena ${a.valor} completa` : `Tienda ${a.valor.split('|')[1]} (${a.valor.split('|')[0]})`);
+  const currentAccesos = () => { const acc = session.user?.accesos || []; const one = acc.find((a) => accKey(a) === state.acc); return one ? [one] : acc; };
+
   function renderScope() {
     const bar = $('#scopeBar');
     const u = session.user;
     if (u && !perm('ver_todo')) {
       bar.hidden = false;
       const acc = u.accesos || [];
-      bar.innerHTML = acc.length
-        ? `Estás viendo: <b>${esc(accesosText(acc))}</b>.`
-        : 'Tu usuario todavía no tiene accesos asignados, así que no hay tiendas para mostrar. Pide a un administrador que te los asigne.';
+      if (state.acc && !acc.some((a) => accKey(a) === state.acc)) { state.acc = ''; store.set('acc', ''); }
+      if (!acc.length) { bar.innerHTML = 'Tu usuario todavía no tiene accesos asignados, así que no hay tiendas para mostrar. Pide a un administrador que te los asigne.'; return; }
+      if (acc.length === 1) { bar.innerHTML = `Estás viendo: <b>${esc(accesosText(acc))}</b>.`; return; }
+      // Varios accesos: selector para mirar todo junto o uno solo.
+      const chip = (key, label) => `<button type="button" class="scope-chip ${state.acc === key ? 'on' : ''}" data-acc="${esc(key)}" aria-pressed="${state.acc === key}">${esc(label)}</button>`;
+      bar.innerHTML = `<span class="scope-label">Ver:</span>${chip('', 'Todo mi alcance')}${acc.map((a) => chip(accKey(a), accShort(a))).join('')}`;
     } else bar.hidden = true;
+  }
+
+  async function setAcc(key) {
+    if (key === state.acc) return;
+    state.acc = key; store.set('acc', key);
+    cmp.data = null; cmp.cache = null; cmp.init = false;
+    renderScope();
+    await loadServer();
+    if (state.view === 'comparativa') renderCmp();
   }
 
   let serverData = null, coordData = null;
@@ -554,10 +573,10 @@
     st.hidden = false; st.className = 'server-status';
     st.innerHTML = '<span class="spinner"></span> Cargando los datos de la base… (si el servidor estaba en reposo puede tardar hasta un minuto)';
     try {
-      serverData = await api('/api/data');
+      serverData = await api('/api/data' + accQuery());
       cmp.data = null; cmp.cache = null;
       const firstLoad = !state.loadedOnce; state.loadedOnce = true;
-      api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); fillCoordList(); }).catch(() => {});
+      api('/api/coordinadores' + accQuery()).then((r) => { coordData = r; renderCoord(); fillCoordList(); }).catch(() => {});
       applyServerData(serverData);
       renderScope();
       st.hidden = true;
@@ -1571,7 +1590,7 @@
   async function loadCmp() {
     if (cmp.data) return cmp.data;
     if (!cmp.loading) {
-      cmp.loading = api('/api/dias').then((D) => {
+      cmp.loading = api('/api/dias' + accQuery()).then((D) => {
         cmp.data = D.rows.map(([ci, mi, cob, y, m, w, d, v, u]) => ({ cadena: D.dict.cadenas[ci], marca: D.dict.marcas[mi], tipo: tipoDe(D.dict.marcas[mi]), cob: cob ?? null, y, m, w, d, v, u }));
         return cmp.data;
       }).finally(() => { cmp.loading = null; });
@@ -1644,7 +1663,7 @@
     let work;
     if (by === 'tienda' || by === 'coordinador') {
       const marcas = F.tipo || F.brand ? [...new Set(data.map((r) => r.marca))].filter((m) => (!F.tipo || tipoDe(m) === F.tipo) && (!F.brand || m === F.brand)) : null;
-      const body = { anios: [yA, yB], meses: [...cmp.months], semanas: [...cmp.weeks], dias: [...cmp.days], cob: state.hasCob ? F.cob : 'all', marcas, cadena: F.chain || '', por: by };
+      const body = { anios: [yA, yB], meses: [...cmp.months], semanas: [...cmp.weeks], dias: [...cmp.days], cob: state.hasCob ? F.cob : 'all', marcas, cadena: F.chain || '', por: by, acc: state.acc || undefined };
       const key = JSON.stringify(body);
       const token = (cmp.token = (cmp.token || 0) + 1);
       let resp = cmp.cache?.key === key ? cmp.cache.resp : null;
@@ -2064,7 +2083,7 @@
     const filt = [state.hasCob && F.cob !== 'all' ? COB_LABEL[F.cob] : null, F.tipo ? TIPO_LABEL[F.tipo] : null, F.chain ? `Cadena ${F.chain}` : null, F.brand ? `Marca ${F.brand}` : null].filter(Boolean);
     return [corte, `Años ${F.years.join(', ')}`, ...filt].join(' · ');
   }
-  const scopeText = () => (!perm('ver_todo') && session.user?.accesos?.length ? ` · Alcance: ${accesosText(session.user.accesos)}` : '');
+  const scopeText = () => (!perm('ver_todo') && session.user?.accesos?.length ? ` · Alcance: ${accesosText(currentAccesos())}` : '');
 
   // Tablas del Resumen (se arman con los mismos cálculos que la pantalla).
   function resumenAOAs(F, R) {
@@ -2358,6 +2377,7 @@
       tip.style.left = Math.min(window.innerWidth - 240, e.clientX + 14) + 'px'; tip.style.top = e.clientY + 14 + 'px';
     });
     heat.addEventListener('mouseleave', () => { tip.hidden = true; });
+    $('#scopeBar').addEventListener('click', (e) => { const b = e.target.closest('[data-acc]'); if (b) setAcc(b.dataset.acc).catch((x) => toast(x.message)); });
     $('#btnFilters').addEventListener('click', () => setDrawer(!$('#filterDrawer').classList.contains('open')));
     $('#btnFiltersClose').addEventListener('click', () => setDrawer(false));
     $('#drawerScrim').addEventListener('click', () => setDrawer(false));

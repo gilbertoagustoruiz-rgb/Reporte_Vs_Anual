@@ -241,9 +241,17 @@ async function auth(req, res, next) {
 const can = (perm, msg) => (req, res, next) => (req.user?.perms[perm] ? next() : res.status(403).json({ error: msg || 'Tu perfil no tiene permiso para hacer esto.' }));
 const adminOnly = can('admin_usuarios', 'Solo un administrador puede gestionar usuarios y perfiles.');
 // Alcance de datos: perfiles sin "ver todo" solo ven las tiendas del coordinador asignado.
-function scopeOf(u) {
+// "elegido" (opcional, "tipo:valor"): mirar solo uno de los accesos del usuario. Si no es suyo, se ignora.
+function scopeOf(u, elegido) {
   if (u.perms.ver_todo) return null;
-  const pick = (t) => u.accesos.filter((a) => a.tipo === t).map((a) => a.valor);
+  let acc = u.accesos;
+  if (elegido) {
+    const i = String(elegido).indexOf(':');
+    const tipo = String(elegido).slice(0, i), valor = String(elegido).slice(i + 1);
+    const uno = acc.filter((a) => a.tipo === tipo && a.valor === valor);
+    if (uno.length) acc = uno;
+  }
+  const pick = (t) => acc.filter((a) => a.tipo === t).map((a) => a.valor);
   return { coords: pick('coordinador'), cadenas: pick('cadena'), tiendas: pick('tienda') };
 }
 // Condición SQL del alcance. "conCoord": la tabla tiene columna coordinador (ventas_tienda_dia);
@@ -281,7 +289,7 @@ app.get('/api/health', wrap(async (req, res) => { await pool.query('SELECT 1'); 
 
 // Datos para el reporte (requiere sesión; un coordinador solo recibe las tiendas que le corresponden).
 app.get('/api/data', wrap(auth), wrap(async (req, res) => {
-  const scope = scopeOf(req.user);
+  const scope = scopeOf(req.user, req.query.acc);
   const [ventas, anios, cargas] = await Promise.all([
     scope == null
       ? pool.query(`SELECT cadena, tienda, marca, anio, mes, semana, venta::float8 AS v, unidades::float8 AS u, cobertura FROM ${SCHEMA}.ventas`)
@@ -309,7 +317,7 @@ app.get('/api/data', wrap(auth), wrap(async (req, res) => {
 
 // Detalle diario para la Comparativa y el Resumen (con el mismo alcance que /api/data).
 app.get('/api/dias', wrap(auth), wrap(async (req, res) => {
-  const scope = scopeOf(req.user);
+  const scope = scopeOf(req.user, req.query.acc);
   const r = scope == null
     ? await pool.query(`SELECT cadena, marca, cobertura, anio, mes, semana, dia, venta::float8 AS v, unidades::float8 AS u FROM ${SCHEMA}.ventas_dia`)
     : await (async () => { const ps = []; const cond = scopeSql(scope, ps, true);
@@ -338,7 +346,7 @@ app.post('/api/comparativa', wrap(auth), wrap(async (req, res) => {
   if (b.cob === 'si') where.push('cobertura = 1'); else if (b.cob === 'no') where.push('cobertura = 0'); else if (b.cob === 'sd') where.push('cobertura IS NULL');
   if (Array.isArray(b.marcas)) add('marca = ANY($?::text[])', b.marcas.map((m) => clean(m, 120)));
   if (b.cadena) add('cadena = $?', clean(b.cadena));
-  const scope = scopeOf(req.user);
+  const scope = scopeOf(req.user, b.acc);
   if (scope != null) where.push(scopeSql(scope, params, true));
   const dims = b.por === 'coordinador' ? ['coordinador'] : ['cadena', 'tienda'];
   const coordCol = b.por === 'coordinador' ? '' : `, (array_agg(coordinador ORDER BY mes DESC, dia DESC) FILTER (WHERE coordinador <> ''))[1] AS coordinador`;
@@ -351,7 +359,7 @@ app.post('/api/comparativa', wrap(auth), wrap(async (req, res) => {
 }));
 
 app.get('/api/coordinadores', wrap(auth), wrap(async (req, res) => {
-  const scope = scopeOf(req.user);
+  const scope = scopeOf(req.user, req.query.acc);
   const ps = [];
   const cond = scope == null ? 'true' : scopeSql(scope, ps, true);
   const r = await pool.query(`SELECT coordinador, count(DISTINCT tienda)::int AS tiendas, round(sum(venta))::float8 AS venta FROM ${SCHEMA}.ventas_tienda_dia

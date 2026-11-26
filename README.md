@@ -110,6 +110,7 @@ Para ver el reporte hay que **iniciar sesión** con DNI y contraseña. Los admin
   - **Una tienda puntual** (cadena | tienda).
 
   Por ejemplo: las tiendas de HERLES CORNELIO, más toda FALABELLA, más la tienda MIRAFLORES de RIPLEY. El filtro lo aplica el **servidor**, así que a ese usuario nunca le llegan los datos de otras tiendas ni los totales generales. Los accesos se guardan en la tabla `usuario_accesos`.
+- **Elegir qué mirar:** si un usuario tiene varios accesos, arriba del reporte aparece el selector **"Ver"**. Puede mirar todo su alcance junto, solo una cadena completa, solo las tiendas de su coordinador o solo una tienda. Ese recorte lo aplica el servidor y lo respetan todas las pestañas y las descargas. Si se pide un acceso que el usuario no tiene, el servidor lo ignora.
 - **Descargas:**
   - **PDF:** captura la pestaña tal como se ve, en hojas A4 horizontales, sin cortar los bloques, con encabezado de corte, usuario y fecha.
   - **Excel:** formato del reporte (encabezados índigo, filas alternas, formatos de soles y %, Var % en verde o rojo), con una hoja por tabla de la pestaña.
