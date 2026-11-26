@@ -1323,7 +1323,7 @@
   }
 
   const mailSecs = () => new Set($$('#adminCorreo [data-sec]').filter((c) => c.checked).map((c) => c.dataset.sec));
-  const mailKey = () => { const c = state.cut || {}; return [c.y, c.m, c.w, c.d, $('#mlPer').value, $('#mlChain').value, [...mailSecs()].join('.')].join('|'); };
+  const mailKey = () => { const c = state.cut || {}; return [c.y, c.m, c.w, c.d, 'mes2', $('#mlChain').value, [...mailSecs()].join('.')].join('|'); };
 
   async function openMail() {
     if (!state.records.length || !state.cut) {
@@ -1334,8 +1334,6 @@
     const chains = [...new Set(state.records.map((r) => r.cadena))].filter(Boolean).sort();
     sel.innerHTML = '<option value="">Todas las cadenas</option>' + chains.map((c) => `<option>${esc(c)}</option>`).join('');
     sel.value = chains.includes(keep) ? keep : '';
-    const wk = $('#mlPer').querySelector('[value=week]');
-    wk.disabled = !state.cut.w; if (wk.disabled && $('#mlPer').value === 'week') $('#mlPer').value = 'ytd';
     if (!mail.loaded) {
       mail.loaded = true;
       try {
@@ -1345,7 +1343,6 @@
       renderMailFrom();
       const d = store.get('mailDraft', null);
       if (d) {
-        if (d.per) $('#mlPer').value = d.per;
         if (d.chain != null && chains.includes(d.chain)) $('#mlChain').value = d.chain;
         if (d.secsOff) $$('#adminCorreo [data-sec]').forEach((c) => (c.checked = !d.secsOff.includes(c.dataset.sec)));
       }
@@ -1374,7 +1371,7 @@
     $('#mlMetaSubject').textContent = $('#mlSubject').value || '—';
   }
   function saveDraft() {
-    store.set('mailDraft', { key: mailKey(), html: $('#mlBody').innerHTML, subject: mail.subjEdited ? $('#mlSubject').value : '', per: $('#mlPer').value, chain: $('#mlChain').value, secsOff: $$('#adminCorreo [data-sec]').filter((c) => !c.checked).map((c) => c.dataset.sec) });
+    store.set('mailDraft', { key: mailKey(), html: $('#mlBody').innerHTML, subject: mail.subjEdited ? $('#mlSubject').value : '', chain: $('#mlChain').value, secsOff: $$('#adminCorreo [data-sec]').filter((c) => !c.checked).map((c) => c.dataset.sec) });
   }
 
   // Dibuja un gráfico de Chart.js fuera de pantalla y lo devuelve como imagen PNG (para incrustarlo en el correo).
@@ -1453,7 +1450,7 @@
 
   async function genMail() {
     const C = cutInfo(), Y = C.y, P = Y - 1;
-    let per = $('#mlPer').value; if (per === 'week' && !C.hasW) per = 'ytd';
+    const per = 'month'; // el correo compara siempre el mes en curso con el mismo mes del año anterior
     const chain = $('#mlChain').value, secs = mailSecs();
     const years = state.years.filter((y) => y <= C.y);
     const recs = state.records.filter((r) => r.y <= C.y && (!chain || r.cadena === chain));
@@ -1546,96 +1543,112 @@
     if (lastW && lastW.a > 0) { const pw = varPct(lastW.b, lastW.a); foco.push(pw >= 0 ? ['📈', `La semana ${C.w} viene fuerte`, `${pct(pw)} frente a la misma semana de ${P}: buen impulso para el cierre.`] : ['🔎', `Ojo con la semana ${C.w}`, `${pct(pw)} frente a la misma semana de ${P}.${lastW.open ? ' La semana todavía está en curso, así que puede mejorar.' : ' Conviene revisar qué pasó.'}`]); }
     if (perdidas) foco.push(['📍', `${perdidas} ${perdidas === 1 ? 'tienda sin venta' : 'tiendas sin venta'} este año`, `Vendían en ${P} y en ${Y} no registran venta. Revisar cobertura o exhibición.`]);
 
-    // ---------- formato ejecutivo: una pantalla, 3 cifras, 2 gráficos, 3 acciones
-    // Paleta de marca en un solo lugar (Below Group). Cambiar aquí si llegan los colores oficiales.
-    const BRAND = { dark: '#16181F', accent: '#F2A900', ink: '#1F2230', muted: '#6B7086', line: '#E6E8EF', good: '#0E7A5C', bad: '#C0283A' };
-    const images = [];
-    if (secs.has('graficos')) {
-      const wkY = C.hasW && state.weekYears.has(Y) && state.weekYears.has(P);
-      if (wkY) {
-        let acc = 0;
-        const gap = Array.from({ length: C.w }, (_, i) => (acc += (R.byYW.get(Y * 100 + i + 1) || 0) - (R.byYW.get(P * 100 + i + 1) || 0)));
-        const above = gap.filter((g) => g >= 0).length;
-        images.push({ cid: 'ventaja', title: `${above === gap.length ? 'Todo el año' : `${above} de ${gap.length} semanas`} por encima de ${P}`,
-          sub: `Ventaja acumulada semana a semana. Hoy: ${signMoney(gap[gap.length - 1])}.`,
-          src: await chartImage({ type: 'bar', data: { labels: gap.map((_, i) => 'S' + (i + 1)), datasets: [{ data: gap, backgroundColor: gap.map((g) => (g >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 2, barPercentage: .92, categoryPercentage: .92 }] } }, { height: 210 }) });
-      } else {
-        const ml = Array.from({ length: C.m }, (_, i) => MESES[i]);
-        const dm = ml.map((_, i) => (i + 1 === C.m ? cur.month - (prev?.month || 0) : (R.byYM.get(Y * 100 + i + 1) || 0) - (R.byYM.get(P * 100 + i + 1) || 0)));
-        images.push({ cid: 'ventaja', title: `Diferencia mes a mes frente a ${P}`, sub: 'Verde: el mes vendió más que el año anterior; rojo: menos.',
-          src: await chartImage({ type: 'bar', data: { labels: ml, datasets: [{ data: dm, backgroundColor: dm.map((g) => (g >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 3 }] } }, { height: 210 }) });
-      }
-    }
-    if (secs.has('cadenas')) {
-      const src = chain ? stores.map((x) => ({ n: x.n, d: x.d })) : chains.map((x) => ({ n: x.n, d: x.d }));
-      const top = [...src].filter((x) => x.d).sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 8).sort((a, b) => b.d - a.d);
-      if (top.length) {
-        const nUp = src.filter((x) => x.d > 0).length;
-        images.push({ cid: 'cadenas', title: chain ? `Quién empuja y quién frena en ${esc(chain)}` : 'Quién empuja y quién frena',
-          sub: `${nUp} de ${src.filter((x) => x.d).length} ${chain ? 'tiendas' : 'cadenas'} venden más que en ${P}${src.length > 8 ? '. Se muestran las 8 que más se mueven' : ''}.`,
-          src: await chartImage({ type: 'bar', data: { labels: top.map((x) => (x.n.length > 22 ? x.n.slice(0, 21) + '…' : x.n)), datasets: [{ data: top.map((x) => x.d), backgroundColor: top.map((x) => (x.d >= 0 ? BRAND.good : BRAND.bad)), borderRadius: 3, barPercentage: .7, categoryPercentage: .9 }] } }, { horizontal: true, valueLabels: true, height: 30 + top.length * 32 }) });
-      }
-    }
-    mail.images = images;
+    // ---------- correo en texto simple, como lo escribiría una persona (mes en curso vs el mismo mes del año anterior)
+    mail.images = [];
+    const MES = C.monthLabel.toLowerCase();
+    // Nombres en mayúsculas → "Plaza Vea", "San Isidro".
+    const nice = (s) => String(s || '').toLowerCase().replace(/(^|[\s\-/(.])([a-záéíóúñü])/g, (m, a, b) => a + b.toUpperCase())
+      .replace(/ (De|Del|La|Las|Los|Y|E|En|El)(?= )/g, (w) => w.toLowerCase());
+    // Montos como se escriben a mano: "S/ 30.5 millones", "S/ 410 mil".
+    const soles = (v) => {
+      const a = Math.abs(v || 0);
+      if (a >= 1e6) { const m = Math.round(a / 1e5) / 10; return `S/ ${m.toLocaleString('es-PE', { maximumFractionDigits: 1 })} ${m === 1 ? 'millón' : 'millones'}`; }
+      if (a >= 1e3) return `S/ ${Math.round(a / 1e3).toLocaleString('es-PE')} mil`;
+      return `S/ ${Math.round(a).toLocaleString('es-PE')}`;
+    };
+    const pc = (x) => (x == null || !isFinite(x) ? '' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1)}%`);
+    const pcAbs = (x) => `${Math.abs(x * 100).toFixed(1)}%`;
+    const corte = C.d ? `al ${C.d} de ${MES}` : `a la semana ${C.w} de ${MES}`;
+    const rango = C.d ? `del 1 al ${C.d} de ${MES}` : `${MES} hasta la semana ${C.w}`;
+    const cuantos = (n, total, uno, varios, verbo1, verboN) => (n === 0 ? `ningun${uno === 'tienda' || uno === 'cadena' ? 'a' : 'o'} ${uno} ${verbo1}` : n === total && total > 1 ? `${total === 2 ? 'las dos' : `las ${total}`} ${varios} ${verboN}`.replace(/^las (\S+) (coordinadores)/, 'los $1 $2') : `${n} de ${total} ${n === 1 ? verbo1 : verboN}`);
+    const per1 = `${MES} ${Y}`, per0 = `${MES} ${P}`;
+    const para = [];
+    const lines = []; // versión en texto plano (para el Excel)
 
-    const F_ = 'font-family:Segoe UI,Arial,Helvetica,sans-serif;';
-    const pctTxt = (x) => (x == null || !isFinite(x) ? '—' : pct(x));
-    const tone = (x) => (x > 0 ? BRAND.good : x < 0 ? BRAND.bad : BRAND.muted);
-    const rows = [];
-    // Marca
-    rows.push(`<tr><td bgcolor="${BRAND.dark}" style="background:${BRAND.dark};padding:16px 24px;${F_}">
-      <table ${T0} width="100%"><tr>
-        <td style="${F_}font-size:13px;font-weight:700;color:#fff;letter-spacing:1.5px">BELOW GROUP</td>
-        <td align="right" style="${F_}font-size:12px;color:#B7BACB">Reporte Vs Anual · Corte ${esc(C.dateText)}${C.hasW ? ` · Sem ${C.w}` : ''}</td>
-      </tr></table></td></tr>
-      <tr><td bgcolor="${BRAND.accent}" style="background:${BRAND.accent};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>`);
-    // Titular
-    const projTxt = proj != null ? ` A este ritmo cerraríamos ${Y} en <b>${moneyShort(proj)}</b>.` : '';
-    rows.push(`<tr><td style="padding:30px 24px 6px;${F_}">
-      <div style="font-size:13px;color:${BRAND.muted}">${esc(perTxt.charAt(0).toUpperCase() + perTxt.slice(1))}${chain ? ` · ${esc(chain)}` : ''}</div>
-      <div style="font-size:56px;line-height:1;font-weight:800;color:${tone(d)};letter-spacing:-1.5px;margin-top:8px">${p == null ? moneyShort(B) : pctTxt(p)}</div>
-      <div style="font-size:17px;color:${BRAND.ink};margin-top:8px">${p == null ? `en ${Y}` : `frente al mismo corte de ${P}`} · <b>${moneyShort(B)}</b> vendidos${p == null ? '' : ` (${d >= 0 ? '+' : ''}${moneyShort(d)})`}</div>
-      <div style="font-size:15px;line-height:1.55;color:${BRAND.ink};margin-top:16px">Hola equipo: ${p == null ? `vamos ${moneyShort(B)} en ${Y}.` : d >= 0 ? `vamos <b style="color:${BRAND.good}">${pctTxt(p)}</b> arriba del año pasado.` : `vamos <b style="color:${BRAND.bad}">${pctTxt(p)}</b> abajo del año pasado.`}${projTxt}</div>
-    </td></tr>`);
-    // Tres cifras
-    if (secs.has('kpis')) {
-      const k = [];
-      if (proj != null) k.push(['Proyección de cierre', moneyShort(proj), `${pctTxt(varPct(proj, fullA))} vs ${P}`, varPct(proj, fullA)]);
-      if (state.hasBrand && shB != null) k.push(['Participación Paraíso', share(shB), shA != null ? `${ppTxt(shB - shA)} vs ${P}` : '', shA != null ? shB - shA : null]);
-      if (lastW && lastW.a > 0) k.push([`Semana ${C.w}${lastW.open ? ' (en curso)' : ''}`, pctTxt(varPct(lastW.b, lastW.a)), `${moneyShort(lastW.b)} vendidos`, varPct(lastW.b, lastW.a)]);
-      if (k.length < 3) k.push(['Tiendas con venta', num(stores.filter((x) => x.b).length), prev ? `${num(stores.filter((x) => x.a).length)} en ${P}` : '', null]);
-      const cells = k.slice(0, 3);
-      rows.push(`<tr><td style="padding:22px 24px 4px"><table ${T0} width="100%" style="border-top:1px solid ${BRAND.line};border-bottom:1px solid ${BRAND.line}"><tr>${cells.map(([l, v2, f, dir], i) => `<td width="${Math.floor(100 / cells.length)}%" valign="top" style="padding:16px ${i === cells.length - 1 ? 0 : 12}px 16px ${i ? 14 : 0}px;${i ? `border-left:1px solid ${BRAND.line};` : ''}${F_}">
-        <div style="font-size:12px;color:${BRAND.muted}">${l}</div>
-        <div style="font-size:26px;font-weight:800;color:${l.startsWith('Semana') ? tone(dir) : BRAND.ink};margin-top:4px;letter-spacing:-.5px;white-space:nowrap">${v2}</div>
-        <div style="font-size:12.5px;color:${dir == null || l.startsWith('Semana') ? BRAND.muted : tone(dir)};margin-top:2px">${f}</div></td>`).join('')}</tr></table></td></tr>`);
+    // 1. Resultado del mes
+    let t;
+    if (!prev || !A) t = `Les comparto cómo vamos en ventas ${corte}${chain ? ` en ${nice(chain)}` : ''}. Llevamos ${soles(B)} vendidos en el mes.`;
+    else t = `Les comparto cómo vamos en ventas ${corte}${chain ? ` en ${nice(chain)}` : ''}. En el mes llevamos ${soles(B)} vendidos, ${pcAbs(p)} ${d >= 0 ? 'más' : 'menos'} que en ${per0} al mismo corte (${soles(A)}); es decir, ${soles(d)} ${d >= 0 ? 'más' : 'menos'}.`;
+    para.push(t); lines.push(t);
+    if (lastW && lastW.a > 0) {
+      const pw = varPct(lastW.b, lastW.a);
+      t = `La semana ${C.w}${lastW.open ? ', que todavía está en curso,' : ''} va ${pcAbs(pw)} ${pw >= 0 ? 'arriba' : 'abajo'} de la misma semana del año pasado.`;
+      para.push(t); lines.push(t);
     }
-    // Resumen en viñetas (opcional)
-    if (secs.has('puntos') && pts.length) {
-      rows.push(`<tr><td style="padding:22px 24px 0;${F_}"><table ${T0} width="100%">${pts.map((t) => `<tr><td valign="top" width="16" style="${F_}font-size:15px;line-height:1.55;color:${BRAND.accent}">•</td><td style="${F_}font-size:14px;line-height:1.55;color:${BRAND.ink};padding-bottom:8px">${t}</td></tr>`).join('')}</table></td></tr>`);
+    // 2. Paraíso vs competencia
+    if (secs.has('paraiso') && state.hasBrand && shB != null && pA && cA) {
+      const gp = varPct(pB, pA), gc = varPct(cB, cA);
+      t = `Paraíso ${gp >= 0 ? 'crece' : 'cae'} ${pcAbs(gp)} y la competencia ${gc >= 0 ? 'crece' : 'cae'} ${pcAbs(gc)}, así que nuestra participación ${shB > shA ? 'sube' : shB < shA ? 'baja' : 'se mantiene'} de ${share(shA)} a ${share(shB)}.`;
+      para.push(t); lines.push(t);
     }
-    // Gráficos
-    for (const im of images) {
-      rows.push(`<tr><td style="padding:28px 24px 0;${F_}">
-        <div style="font-size:18px;font-weight:800;color:${BRAND.ink};letter-spacing:-.2px">${im.title}</div>
-        <div style="font-size:13px;color:${BRAND.muted};margin-top:3px">${im.sub}</div>
-        <img src="${im.src}" data-cid="${im.cid}" width="552" alt="${esc(im.title)}" style="display:block;width:100%;max-width:552px;height:auto;margin-top:12px;border:0"></td></tr>`);
+    // 3. Cadenas
+    if (secs.has('cadenas') && !chain && chains.length > 1) {
+      const cu2 = chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), cd2 = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+      const fmt = (x) => `${nice(x.n)} (${x.d >= 0 ? '+' : '-'}${soles(x.d)}${x.a ? `, ${pc(varPct(x.b, x.a))}` : ''})`;
+      t = `Por cadena, ${cu2.length ? cuantos(cu2.length, chains.length, 'cadena', 'cadenas', 'crece', 'crecen') : 'ninguna crece'}.`;
+      if (cu2.length) t += ` El mayor aporte viene de ${fmt(cu2[0])}${cu2[1] ? ` y ${fmt(cu2[1])}` : ''}.`;
+      if (cd2.length) t += ` ${cu2.length ? 'En cambio, ' : cd2.length > 1 ? 'Las que más bajan son ' : 'La que más baja es '}${cu2.length ? '' : ''}${fmt(cd2[0])}${cd2[1] ? ` y ${fmt(cd2[1])}` : ''}${cu2.length ? ` ${cd2.length > 1 ? 'son las que más bajan' : 'es la que más baja'}` : ''}.`;
+      para.push(t); lines.push(t);
     }
-    // Acciones
-    if (secs.has('foco') && foco.length) {
-      rows.push(`<tr><td style="padding:30px 24px 0;${F_}">
-        <div style="font-size:18px;font-weight:800;color:${BRAND.ink}">Tres acciones para esta semana</div>
-        <table ${T0} width="100%" style="margin-top:10px">${foco.slice(0, 3).map(([, t, s2]) => `<tr><td valign="top" width="26" style="padding:12px 0;border-top:1px solid ${BRAND.line};${F_}font-size:18px;font-weight:800;color:${BRAND.accent};line-height:1.2">→</td><td style="padding:12px 0;border-top:1px solid ${BRAND.line};${F_}"><div style="font-size:15px;font-weight:700;color:${BRAND.ink}">${t}</div><div style="font-size:13.5px;color:${BRAND.muted};margin-top:3px;line-height:1.5">${s2}</div></td></tr>`).join('')}</table></td></tr>`);
+    // 4. Tiendas
+    if (secs.has('tiendas') && stores.length) {
+      t = `En tiendas, ${up.length === 0 ? 'ninguna crece' : `${up.length} ${up.length === 1 ? 'crece' : 'crecen'}`} y ${down.length === 0 ? 'ninguna cae' : `${down.length} ${down.length === 1 ? 'cae' : 'caen'}`} frente a ${per0}.`;
+      if (up[0]) t += ` La que más sube es ${nice(up[0].n)} de ${nice(up[0].c)} (+${soles(up[0].d)})`;
+      if (down[0]) t += `${up[0] ? ' y la que más baja' : ' La que más baja es'} ${nice(down[0].n)} de ${nice(down[0].c)} (-${soles(down[0].d)})`;
+      if (up[0] || down[0]) t += '.';
+      if (perdidas) t += ` Hay ${perdidas} ${perdidas === 1 ? 'tienda que vendió' : 'tiendas que vendieron'} en ${per0} y este mes todavía no ${perdidas === 1 ? 'registra' : 'registran'} venta.`;
+      para.push(t); lines.push(t);
     }
-    // Cierre
-    rows.push(`<tr><td style="padding:28px 24px 30px;${F_}">
-      <table ${T0}><tr><td bgcolor="${BRAND.dark}" style="background:${BRAND.dark};border-radius:6px"><a href="${esc(location.origin + location.pathname)}" style="display:inline-block;padding:12px 22px;${F_}font-size:14px;font-weight:700;color:#fff;text-decoration:none">Ver el reporte completo</a></td></tr></table>
-      <div style="font-size:13px;color:${BRAND.muted};margin-top:14px">El detalle por cadena, tienda, coordinador y mes va en el Excel adjunto.</div>
-      <div style="font-size:14px;color:${BRAND.ink};margin-top:22px">Saludos,<br><b>${esc(session.user?.nombre || '')}</b></div></td></tr>`);
-    $('#mlBody').innerHTML = `<table ${T0} width="100%" style="max-width:600px;background:#fff">${rows.join('\n')}</table>`;
+    // 5. Coordinadores
+    const cv2 = (coord || []).filter((o) => o.a > 0).map((o) => ({ ...o, p: varPct(o.b, o.a) }));
+    if (secs.has('coord') && cv2.length > 1) {
+      const best = cv2.reduce((m, x) => (x.p > m.p ? x : m)), worst = cv2.reduce((m, x) => (x.p < m.p ? x : m));
+      const nUp = cv2.filter((x) => x.p > 0).length;
+      t = `Por coordinador, ${nUp === 0 ? 'ninguno va' : nUp === cv2.length ? 'todos van' : `${nUp} de ${cv2.length} ${nUp === 1 ? 'va' : 'van'}`} por encima del año pasado. ${best.p >= 0 ? `${nice(best.n)} tiene el mejor resultado (${pc(best.p)})` : `${nice(best.n)} tiene la caída más leve (${pc(best.p)})`} y ${nice(worst.n)} ${worst.p >= 0 ? 'el crecimiento más bajo' : 'la caída más fuerte'} (${pc(worst.p)}).`;
+      para.push(t); lines.push(t);
+    }
+    // 6. Puntos a revisar
+    const revisar = [];
+    if (secs.has('foco')) {
+      const cd2 = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+      if (cd2[0] && !chain) {
+        const sd = stores.filter((x) => x.c === cd2[0].n && x.d < 0).sort((a, b) => a.d - b.d)[0];
+        revisar.push(`${nice(cd2[0].n)}: cae ${soles(cd2[0].d)}${sd ? `; ${nice(sd.n)} explica ${Math.round(Math.min(1, sd.d / cd2[0].d) * 100)}% de esa caída` : ''}.`);
+      } else if (down[0]) revisar.push(`${nice(down[0].n)}: es la tienda que más baja (-${soles(down[0].d)}).`);
+      if (up[0]) revisar.push(`${nice(up[0].n)}: es la que más crece; vale la pena ver qué está haciendo distinto para replicarlo.`);
+      if (state.hasBrand && shA != null && shB != null && shB < shA) revisar.push(`Participación: Paraíso pierde ${((shA - shB) * 100).toFixed(1)} puntos frente a la competencia este mes.`);
+      if (lastW && lastW.a > 0 && lastW.b < lastW.a && !lastW.open) revisar.push(`Semana ${C.w}: quedó por debajo de la misma semana del año pasado.`);
+      if (perdidas) revisar.push(`Tiendas sin venta este mes: ${perdidas}. Revisar cobertura o exhibición.`);
+    }
+
+    // Tabla sencilla, como pegada de Excel.
+    let tabla = '';
+    if (secs.has('tabla')) {
+      const src = chain ? [...stores].sort((a, b) => b.b - a.b) : chains;
+      const top = src.slice(0, 15);
+      const TA = src.reduce((s2, x) => s2 + x.a, 0), TB = src.reduce((s2, x) => s2 + x.b, 0);
+      const td = (v2, right, bold) => `<td style="border:1px solid #bfbfbf;padding:3px 8px;${right ? 'text-align:right;' : ''}${bold ? 'font-weight:bold;' : ''}white-space:nowrap">${v2}</td>`;
+      const nf = (v2) => Math.round(v2).toLocaleString('es-PE');
+      tabla = `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#000;margin:4px 0 14px">
+        <tr style="background:#f2f2f2">${td(`<b>${chain ? 'Tienda' : 'Cadena'}</b>`)}${td(`<b>${C.monthLabel} ${P}</b>`, true)}${td(`<b>${C.monthLabel} ${Y}</b>`, true)}${td('<b>Var %</b>', true)}</tr>
+        ${top.map((x) => `<tr>${td(esc(nice(x.n)))}${td(nf(x.a), true)}${td(nf(x.b), true)}${td(x.a ? pc(varPct(x.b, x.a)) : 'nueva', true)}</tr>`).join('')}
+        <tr>${td('Total', false, true)}${td(nf(TA), true, true)}${td(nf(TB), true, true)}${td(pc(varPct(TB, TA)), true, true)}</tr></table>`;
+    }
+
+    const P_ = (h) => `<div style="margin:0 0 12px">${h}</div>`;
+    const html = [
+      P_('Hola equipo,'),
+      ...para.map((x) => P_(esc(x))),
+      tabla ? P_(`Este es el resumen por ${chain ? 'tienda' : 'cadena'} (montos en soles, ${rango} en ambos años):`) + tabla : '',
+      revisar.length ? `<div style="margin:0 0 4px">Puntos a revisar:</div><ul style="margin:0 0 12px;padding-left:22px">${revisar.map((r) => `<li style="margin:0 0 4px">${esc(r)}</li>`).join('')}</ul>` : '',
+      $('#mlAttach').checked ? P_(`Adjunto el Excel con el detalle por cadena, tienda y coordinador.`) : '',
+      P_(`Saludos,<br>${esc(session.user?.nombre || '')}`),
+    ].filter(Boolean).join('\n');
+    $('#mlBody').innerHTML = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;padding:24px 26px">${html}</div>`;
+    pts.length = 0; pts.push(...lines, ...revisar.map((r) => 'Revisar: ' + r));
 
     // Asunto por defecto (si el administrador no lo cambió a mano).
-    const subj = `Reporte Vs Anual · ${perShort} al ${C.dateText}${chain ? ` · ${chain}` : ''}: ${Y} ${p == null ? moneyShort(B) : pct(p) + ' vs ' + P}`;
+    const subj = `Avance ${C.monthLabel.toLowerCase()} ${Y} vs ${C.monthLabel.toLowerCase()} ${P}${C.d ? ` (al ${String(C.d).padStart(2, '0')}/${String(C.m).padStart(2, '0')})` : ''}${chain ? ` - ${chain.charAt(0) + chain.slice(1).toLowerCase()}` : ''}`;
     if (!mail.subjEdited) $('#mlSubject').value = subj;
 
     // Excel adjunto con las mismas cifras.
@@ -1777,8 +1790,8 @@
       if (!mail.edited) { genMail(); return; }
       setMailState('Cambiaste qué analizar. Pulsa "Volver a generar el análisis" para actualizar el correo (se reemplaza el texto que editaste).');
     };
-    $('#mlPer').addEventListener('change', onScope);
     $('#mlChain').addEventListener('change', onScope);
+    $('#mlAttach').addEventListener('change', onScope);
     $$('#adminCorreo [data-sec]').forEach((c) => c.addEventListener('change', onScope));
     $('#mlRegen').addEventListener('click', () => {
       if (mail.edited && !confirm('Se reemplazará el texto que editaste por un análisis nuevo. ¿Continuar?')) return;
