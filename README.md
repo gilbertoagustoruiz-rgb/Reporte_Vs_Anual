@@ -170,7 +170,11 @@ Otra forma: **New → Static Site**, con *Build command* vacío y *Publish direc
 
 ## Análisis y correo (Administración)
 
-En **Administración → Análisis y correo** el reporte arma solo un correo con el análisis del último corte:
+En **Administración → Análisis y correo** el reporte arma solo un correo con el análisis del último corte
+(cabecera con el avance frente al año anterior, indicadores con proyección de cierre, gráficos de ritmo semanal,
+ventaja acumulada y mes a mes, Paraíso vs competencia, de dónde sale la diferencia por cadena, tiendas,
+coordinadores, mapa de calor mensual y "dónde poner el foco"). Los gráficos viajan como imágenes incrustadas (cid);
+con Google Apps Script hace falta la versión 2 del script. Antes:
 titular, indicadores, puntos clave en lenguaje simple, tabla por cadena, tiendas que más suben y bajan,
 coordinadores y mes a mes. Se puede elegir el período (acumulado, mes o semana de corte), una cadena y qué secciones incluir.
 

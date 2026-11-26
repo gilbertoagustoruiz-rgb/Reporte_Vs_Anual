@@ -1,5 +1,5 @@
 /**
- * Puente de envío del Reporte Vs Anual por Gmail.
+ * Puente de envío del Reporte Vs Anual por Gmail. Versión 2 (con gráficos dentro del correo).
  *
  * Render (plan gratis) no deja conectarse a los servidores de correo, así que el reporte
  * le pide a este script de Google que envíe el correo. El script corre con TU cuenta de Gmail:
@@ -17,6 +17,11 @@
  */
 const CLAVE = 'ESCRIBE-AQUI-UNA-CLAVE-LARGA';
 
+// El reporte consulta la versión para saber si puede mandar gráficos.
+function doGet() {
+  return salida({ ok: true, version: 2 });
+}
+
 function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
@@ -26,6 +31,12 @@ function doPost(e) {
     if (d.cc) opciones.cc = d.cc;
     if (d.adjunto && d.adjunto.base64) {
       opciones.attachments = [Utilities.newBlob(Utilities.base64Decode(d.adjunto.base64), d.adjunto.tipo, d.adjunto.nombre)];
+    }
+    if (d.imagenes && d.imagenes.length) {
+      opciones.inlineImages = {};
+      d.imagenes.forEach(function (im) {
+        opciones.inlineImages[im.cid] = Utilities.newBlob(Utilities.base64Decode(im.base64), 'image/png', im.cid + '.png');
+      });
     }
     GmailApp.sendEmail(d.para, d.asunto, 'Este correo tiene formato. Si no lo ves, ábrelo en Gmail.', opciones);
     return salida({ ok: true, desde: Session.getActiveUser().getEmail() });

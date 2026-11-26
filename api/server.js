@@ -576,10 +576,20 @@ const getMailer = () => mailer || (mailer = nodemailer.createTransport({
   auth: { user: SMTP_USER, pass: SMTP_PASS }, connectionTimeout: 15e3, greetingTimeout: 15e3,
 }));
 const sendLog = [];
+// La versión 2 del script de Google acepta gráficos incrustados; se consulta con un GET y se recuerda 10 minutos.
+let hookInfo = { t: 0, v: 0 };
+async function hookSupportsImages() {
+  if (!hookReady()) return true; // por SMTP siempre se pueden incrustar
+  if (Date.now() - hookInfo.t < 600e3) return hookInfo.v >= 2;
+  let v = 1;
+  try { const r = await fetch(HOOK_URL, { redirect: 'follow', signal: AbortSignal.timeout(8e3) }); const j = JSON.parse(await r.text()); v = +j.version || 1; } catch { v = 1; }
+  hookInfo = { t: Date.now(), v };
+  return v >= 2;
+}
 
 app.get('/api/correo', wrap(auth), adminOnly, wrap(async (req, res) => {
   const r = await pool.query(`SELECT valor FROM ${SCHEMA}.ajustes WHERE clave = 'correo'`);
-  res.json({ para: [], cc: [], ...(r.rows[0]?.valor || {}), envio: { listo: smtpReady(), desde: SMTP_USER || null } });
+  res.json({ para: [], cc: [], ...(r.rows[0]?.valor || {}), envio: { listo: smtpReady(), desde: SMTP_USER || null, graficos: await hookSupportsImages() } });
 }));
 
 app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
@@ -604,13 +614,20 @@ app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
     const filename = String(b.adjunto.nombre || 'Analisis_Vs_Anual.xlsx').replace(/[^\w.\-]+/g, '_').slice(0, 100);
     attachments.push({ filename: filename.endsWith('.xlsx') ? filename : filename + '.xlsx', content, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
+  // Gráficos incrustados en el correo (cid).
+  const imagenes = [];
+  for (const im of (Array.isArray(b.imagenes) ? b.imagenes : []).slice(0, 6)) {
+    const cid = String(im?.cid || ''), b64 = String(im?.base64 || '');
+    if (!/^[\w-]{1,40}$/.test(cid) || !/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 2e6) return res.status(400).json({ error: 'Uno de los gráficos no es válido.' });
+    imagenes.push({ cid, base64: b64 });
+  }
   const nombre = String(req.user.nombre || '').replace(/["\r\n<>]/g, '').trim();
   if (hookReady()) {
     try {
       const r = await fetch(HOOK_URL, {
         method: 'POST', redirect: 'follow', signal: AbortSignal.timeout(90e3),
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ secret: HOOK_SECRET, para: para.join(','), cc: cc.join(','), asunto, html, nombre,
+        body: JSON.stringify({ secret: HOOK_SECRET, para: para.join(','), cc: cc.join(','), asunto, html, nombre, imagenes,
           adjunto: attachments[0] ? { nombre: attachments[0].filename, tipo: attachments[0].contentType, base64: attachments[0].content.toString('base64') } : null }),
       });
       const txt = await r.text();
@@ -628,7 +645,8 @@ app.post('/api/correo/enviar', wrap(auth), adminOnly, wrap(async (req, res) => {
   try {
     const info = await getMailer().sendMail({
       from: nombre ? { name: nombre, address: SMTP_USER } : SMTP_USER,
-      to: para, cc: cc.length ? cc : undefined, subject: asunto, html, attachments,
+      to: para, cc: cc.length ? cc : undefined, subject: asunto, html,
+      attachments: [...attachments, ...imagenes.map((im) => ({ filename: im.cid + '.png', content: Buffer.from(im.base64, 'base64'), contentType: 'image/png', cid: im.cid }))],
       disableFileAccess: true, disableUrlAccess: true,
     });
     sendLog.push(now);
