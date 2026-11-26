@@ -429,3 +429,93 @@ h1, h2, h3, h4, .k-value, .hero-line, .ins-value, .hk-value { font-family: "Sora
 .drawer .cut-banner { display: block; font-size: 14px; line-height: 1.5; }
 .drawer .cut-tag { display: inline-block; margin-bottom: 8px; }
 .drawer .cut-years { display: block; margin-top: 6px; }
+
+/* =====================================================================
+   Resumen (dashboard inicial)
+   ===================================================================== */
+.sum-hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 28px; align-items: end; }
+.sum-years { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; align-items: end; height: 150px; }
+.sy-col { display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; cursor: default; }
+.sy-val { font: 600 11.5px "Sora", sans-serif; color: #C9CCF2; white-space: nowrap; }
+.sy-bar { width: 100%; border-radius: 8px 8px 3px 3px; background: #ffffff2b; min-height: 4px; }
+.sy-col.now .sy-bar { background: linear-gradient(180deg, #7FA0FF, var(--sky)); }
+.sy-col.now .sy-val { color: #fff; }
+.sy-year { font: 700 13px "Sora", sans-serif; color: #C9CCF2; }
+.sy-col.now .sy-year { color: #fff; }
+.sum-kpis { grid-template-columns: repeat(5, 1fr); }
+
+/* Reparto por cadena: dos barras al 100 % (año anterior / año actual) y leyenda clicable */
+.share-wrap { display: flex; flex-direction: column; gap: 14px; }
+.share-row { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; }
+.share-row b { font: 700 13px "Sora", sans-serif; color: var(--text-2); }
+.share-bar { display: flex; height: 34px; border-radius: 10px; overflow: hidden; background: #EEF0F6; }
+.share-seg { height: 100%; border: 0; padding: 0; cursor: pointer; position: relative; transition: filter .15s; }
+.share-seg:hover, .share-seg:focus-visible { filter: brightness(1.12); }
+.share-seg + .share-seg { box-shadow: inset 2px 0 0 #fff; }
+.share-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin: 4px 0 0; padding: 0; list-style: none; }
+.share-list li { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center; font-size: 13px; }
+.share-list button { all: unset; cursor: pointer; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-list button:hover { color: var(--sky); text-decoration: underline; }
+.share-list .sw { width: 12px; height: 12px; border-radius: 4px; }
+.share-list .pp { font-size: 12px; font-weight: 700; min-width: 58px; text-align: right; }
+
+/* Calendario de calor */
+.heat-scroll { overflow-x: auto; padding-bottom: 6px; }
+.heat { display: grid; grid-auto-flow: column; grid-template-rows: 18px repeat(7, 15px); gap: 3px; min-width: max-content; }
+.heat .hm { font-size: 11px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.heat .hd { width: 15px; height: 15px; border-radius: 4px; border: 0; padding: 0; cursor: pointer; background: var(--c, #E6E8F0); }
+.heat .hd:hover, .heat .hd:focus-visible { outline: 2px solid var(--night); outline-offset: 1px; }
+.heat .hd.none { background: #F4F6FB; box-shadow: inset 0 0 0 1px #E2E6F0; cursor: default; }
+.heat .hx { width: 15px; height: 15px; }
+.heat-legend { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.heat-legend i { width: 14px; height: 14px; border-radius: 4px; background: var(--c); display: inline-block; }
+.heat-legend span { margin: 0 4px; }
+.heat-tip { position: fixed; z-index: 60; pointer-events: none; background: var(--night); color: #fff; border-radius: 10px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 10px 30px -10px rgba(0,0,0,.5); }
+
+/* Rankings espejo */
+.rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rank li > button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 10px; position: relative; isolation: isolate; }
+.rank li > button:hover, .rank li > button:focus-visible { background: #F4F6FB; }
+.rank .pos { font: 700 12px "Sora", sans-serif; color: var(--muted); text-align: center; }
+.rank .who { min-width: 0; }
+.rank .who b { display: block; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank .who small { color: var(--muted); font-size: 12px; }
+.rank .amt { font: 700 13.5px "Sora", sans-serif; text-align: right; }
+.rank .amt small { display: block; font: 600 11.5px "Plus Jakarta Sans", sans-serif; opacity: .8; }
+.rank .fill { position: absolute; z-index: -1; left: 0; top: 4px; bottom: 4px; width: var(--w); border-radius: 8px; opacity: .14; }
+.rank.up .amt { color: var(--good); } .rank.up .fill { background: var(--mint); }
+.rank.down .amt { color: var(--bad); } .rank.down .fill { background: var(--rose); }
+.rank .empty { color: var(--muted); font-size: 13px; padding: 8px 10px; }
+
+/* Dona Paraíso */
+.donut-wrap { display: grid; grid-template-columns: 240px 1fr; gap: 22px; align-items: center; min-height: 380px; }
+.chart-box.donut { height: 240px; position: relative; }
+.donut-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+.donut-center b { font: 800 30px "Sora", sans-serif; color: var(--text); }
+.donut-center span { font-size: 12.5px; color: var(--muted); }
+.donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.donut-legend li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; }
+.donut-legend .sw { width: 14px; height: 14px; border-radius: 4px; margin-top: 3px; }
+.donut-legend b { font: 700 15px "Sora", sans-serif; display: block; }
+.donut-legend small { color: var(--muted); font-size: 12.5px; }
+
+@media (max-width: 1100px) {
+  .sum-hero-grid { grid-template-columns: 1fr; }
+  .sum-kpis { grid-template-columns: repeat(2, 1fr); }
+  .donut-wrap { grid-template-columns: 1fr; }
+  .share-list { grid-template-columns: 1fr; }
+}
+
+.share-wrap { justify-content: center; flex: 1; }
+.pair .panel .share-wrap { min-height: 380px; }
+.share-bar { height: 42px; }
+.share-head, .share-list li { display: grid; grid-template-columns: 12px minmax(0, 1fr) 84px 70px 56px 70px; gap: 10px; align-items: center; }
+.share-head { font-size: 11.5px; color: var(--muted); font-weight: 600; padding: 0 2px; margin-top: 8px; }
+.share-head span:nth-child(n+3), .share-list li > span:nth-child(n+3) { text-align: right; }
+.share-list { grid-template-columns: 1fr; gap: 0; }
+.share-list li { padding: 8px 2px; border-top: 1px solid #EEF0F6; font-size: 13.5px; }
+.share-list .sv { font: 600 13px "Sora", sans-serif; }
+.share-list .vp, .share-list .pp { font-weight: 700; font-size: 12.5px; }
+.share-list .sh { font-weight: 700; }
+.heat { grid-template-columns: 16px; }
+.heat .hw { width: 16px; height: 15px; font-size: 10.5px; line-height: 15px; color: var(--muted); font-weight: 700; text-align: center; }

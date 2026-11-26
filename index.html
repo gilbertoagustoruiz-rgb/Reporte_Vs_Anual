@@ -19,9 +19,10 @@
       </div>
     </div>
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="datos" role="tab">Datos</button>
+      <button class="tab" data-view="resumen" role="tab">Resumen</button>
       <button class="tab" data-view="comparativa" role="tab">Comparativa</button>
       <button class="tab" data-view="anual" role="tab">Por año</button>
+      <button class="tab active" data-view="datos" role="tab">Datos</button>
     </nav>
     <div class="userbox" id="userBox"></div>
   </header>
@@ -131,6 +132,75 @@
         </aside>
       </div>
     </div>
+
+    <!-- ============ RESUMEN (dashboard inicial) ============ -->
+    <section id="view-resumen" class="view" data-analysis>
+      <header class="hero sum-hero">
+        <div class="sum-hero-grid">
+          <div class="hero-copy">
+            <p class="hero-kicker">Resumen al <span id="sumCutText"></span></p>
+            <h2 class="hero-line" id="sumHeadline"></h2>
+            <p class="hero-sub" id="sumSub"></p>
+          </div>
+          <div class="sum-years" id="sumYears" aria-label="Acumulado al corte por año"></div>
+        </div>
+        <div class="hero-kpis sum-kpis" id="sumKpis"></div>
+      </header>
+
+      <div class="pair">
+        <article class="panel clickable-panel">
+          <h3 id="sumMonthTitle">Mes a mes</h3>
+          <p class="panel-sub">Venta por mes de <span data-sy></span> frente a <span data-sp></span>. Haz clic en un mes para ver su detalle.<span id="sumMonthNote"></span></p>
+          <div class="chart-box sym"><canvas id="chartSumMonths" role="img" aria-label="Venta mes a mes"></canvas></div>
+        </article>
+        <article class="panel">
+          <h3 id="sumShareTitle">Cómo se reparte la venta</h3>
+          <p class="panel-sub">Participación de cada cadena en el acumulado al corte. Haz clic en una cadena para ver sus tiendas.</p>
+          <div class="share-wrap" id="sumShare"></div>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h3 id="sumHeatTitle">El año día por día</h3>
+            <p class="panel-sub">Cada cuadro es un día de <span data-sy></span>, comparado con el mismo día de la semana de <span data-sp></span>. Haz clic en un día para ver su detalle.</p>
+          </div>
+          <div class="heat-legend" aria-hidden="true"><span>Vende menos</span><i style="--c:#F0475A"></i><i style="--c:#F7A3AC"></i><i style="--c:#E6E8F0"></i><i style="--c:#8FDCC4"></i><i style="--c:#14B88A"></i><span>Vende más</span></div>
+        </div>
+        <div class="heat-scroll"><div class="heat" id="sumHeat"></div></div>
+        <div class="heat-tip" id="heatTip" hidden></div>
+      </article>
+
+      <div class="pair">
+        <article class="panel">
+          <h3>Tiendas que más crecen</h3>
+          <p class="panel-sub">Diferencia en soles del acumulado al corte.</p>
+          <ol class="rank up" id="sumUp"></ol>
+        </article>
+        <article class="panel">
+          <h3>Tiendas que más caen</h3>
+          <p class="panel-sub">Diferencia en soles del acumulado al corte.</p>
+          <ol class="rank down" id="sumDown"></ol>
+        </article>
+      </div>
+
+      <div class="pair">
+        <article class="panel" id="sumShareParaisoCard">
+          <h3 id="sumParTitle">Paraíso frente a la competencia</h3>
+          <p class="panel-sub">Participación en el acumulado al corte de <span data-sy></span>.</p>
+          <div class="donut-wrap">
+            <div class="chart-box donut"><canvas id="chartSumDonut" role="img" aria-label="Participación Paraíso vs competencia"></canvas><div class="donut-center" id="sumDonutCenter"></div></div>
+            <ul class="donut-legend" id="sumDonutLegend"></ul>
+          </div>
+        </article>
+        <article class="panel">
+          <h3 id="sumWeeksTitle">Últimas semanas</h3>
+          <p class="panel-sub">Variación % de cada semana frente a la misma semana de <span data-sp></span>. Haz clic en una semana para ver su detalle.</p>
+          <div class="chart-box sym"><canvas id="chartSumWeeks" role="img" aria-label="Variación de las últimas semanas"></canvas></div>
+        </article>
+      </div>
+    </section>
 
     <!-- ============ COMPARATIVA ============ -->
     <section id="view-comparativa" class="view" data-analysis>

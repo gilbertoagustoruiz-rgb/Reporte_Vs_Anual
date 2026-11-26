@@ -526,9 +526,11 @@
     try {
       serverData = await api('/api/data');
       cmp.data = null; cmp.cache = null;
+      const firstLoad = !state.loadedOnce; state.loadedOnce = true;
       api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); }).catch(() => {});
       applyServerData(serverData);
       st.hidden = true;
+      if (firstLoad && state.records.length && state.view === 'datos') setView('resumen');
     } catch (e) {
       st.className = 'server-status err';
       st.innerHTML = `${esc(e.message)} <button class="btn" id="btnRetry">Reintentar</button>`;
@@ -847,7 +849,8 @@
     for (const r of F.recs) {
       const Y = byYear.get(r.y);
       if (!Y) continue;
-      const ytd = inYtd(r), mo = r.m === C.m, wk = C.hasW && r.w === C.w;
+      // Mes de corte parejo: en los demás años, el mes solo cuenta hasta la semana de corte (no el mes completo).
+      const ytd = inYtd(r), mo = r.m === C.m && (r.y === C.y || !(C.hasW && state.weekYears.has(r.y) && r.w > 0) || r.w <= C.w), wk = C.hasW && r.w === C.w;
       const sk = r.cadena + '\u0001' + r.tienda;
       Y.full += r.v; if (r.v) Y.storesFull.add(sk);
       if (ytd) { Y.ytd += r.v; Y.u += r.u; if (r.v) Y.stores.add(sk); }
@@ -962,6 +965,7 @@
     const R = compute(F);
     lastF = F; lastR = R;
     renderBanner(F);
+    renderResumen(F, R);
     renderKpis(F, R);
     renderYearCharts(F, R);
     renderTable('tblYears', yearsAOA(F, R));
@@ -1081,6 +1085,249 @@
         scales: { x: { grid: { display: false }, ticks: { color: TICK } }, y: { beginAtZero: true, grid: { color: GRID }, border: { display: false }, ticks: { color: TICK, callback: moneyTick } } },
       },
     });
+  }
+
+  // ---------------------------------------------------------------- resumen (dashboard inicial)
+  const CHAIN_PAL = ['#3D6BFF', '#FF8A3D', '#8B5CF6', '#0EA5E9', '#E0A100', '#1B1F4B', '#C2410C', '#0891B2', '#7C3AED', '#A16207'];
+  const chainColor = (c) => {
+    const all = [...new Set(state.records.map((r) => r.cadena))].sort((a, b) => a.localeCompare(b, 'es'));
+    const i = all.indexOf(c);
+    return i < 0 ? '#94A3B8' : CHAIN_PAL[i % CHAIN_PAL.length];
+  };
+  const ppTxt = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1)} pp`);
+
+  // Ir al detalle: abre la Comparativa ya filtrada en lo que se tocó.
+  function goDetail({ months = null, weeks = null, days = null, by = null, chain = null }) {
+    const C = lastF.C;
+    cmp.init = true;
+    cmp.months = new Set(months ?? []);
+    cmp.weeks = new Set(weeks ?? []);
+    cmp.days = new Set(days ?? []);
+    if (by) $('#cmpBy').value = by;
+    if (chain != null) { $('#fChain').value = chain; renderAll(); }
+    const yB = C.y, yA = state.years.includes(C.y - 1) ? C.y - 1 : state.years[0];
+    if ([...$('#cmpYearB').options].some((o) => +o.value === yB)) { $('#cmpYearB').value = yB; $('#cmpYearA').value = yA; }
+    setView('comparativa');
+  }
+
+  function renderResumen(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const cur = R.byYear.get(Y), prev = R.byYear.get(P);
+    $$('[data-sy]').forEach((e) => (e.textContent = Y));
+    $$('[data-sp]').forEach((e) => (e.textContent = P));
+    const cutTxt = C.d ? `${C.d} de ${C.monthLabel.toLowerCase()} de ${Y}` : `${C.monthLabel.toLowerCase()} de ${Y}`;
+    $('#sumCutText').textContent = cutTxt;
+
+    // Titular
+    const p = prev ? varPct(cur.ytd, prev.ytd) : null;
+    const cls = p == null ? '' : p >= 0 ? 'up' : 'down';
+    $('#sumHeadline').innerHTML = p == null
+      ? `En ${Y} vamos <span class="amount">${moneyShort(cur.ytd)}</span> de venta`
+      : `${Y} va <span class="amount">${moneyShort(cur.ytd)}</span>, <span class="delta ${cls}">${(p > 0 ? '+' : '') + (p * 100).toFixed(1)}%</span> <span class="vs">frente al mismo corte de ${P}</span>`;
+    const filt = [F.cob && F.cob !== 'all' && state.hasCob ? COB_LABEL[F.cob].toLowerCase() : null, F.tipo ? TIPO_LABEL[F.tipo].toLowerCase() : null, F.chain ? `cadena ${F.chain}` : null, F.brand ? `marca ${F.brand}` : null].filter(Boolean);
+    $('#sumSub').textContent = `Acumulado de ${C.ytdLabel(Y).replace('Sem', 'la semana').replace('–', ' a la ')} en cada año, para comparar en igualdad de condiciones${filt.length ? '. Filtro: ' + filt.join(', ') : ''}.`;
+
+    // Mini barras de años en el hero
+    const ys = F.years;
+    const maxY = Math.max(1, ...ys.map((y) => R.byYear.get(y).ytd));
+    $('#sumYears').innerHTML = ys.map((y) => {
+      const v = R.byYear.get(y).ytd;
+      return `<div class="sy-col ${y === Y ? 'now' : ''}" title="${y}: ${money(v)}"><span class="sy-val">${moneyShort(v)}</span><div class="sy-bar" style="height:${Math.max(3, (v / maxY) * 100)}%"></div><span class="sy-year">${y}</span></div>`;
+    }).join('');
+
+    // Indicadores
+    const foot = (a, b) => { const x = varPct(b, a); return x == null ? `sin dato de ${P}` : `<span class="${dirCls(x)}">${x > 0 ? '▲' : x < 0 ? '▼' : ''} ${pct(x)}</span> vs ${P}`; };
+    const shareOf = (Yo) => (Yo && Yo.p.ytd + Yo.c.ytd > 0 ? Yo.p.ytd / (Yo.p.ytd + Yo.c.ytd) : null);
+    const sh = shareOf(cur), shP = shareOf(prev);
+    const kpis = [
+      [`Acumulado ${Y}`, moneyShort(cur.ytd), prev ? foot(prev.ytd, cur.ytd) : ''],
+      [`${C.monthLabel} ${Y} (al corte)`, moneyShort(cur.month), prev ? foot(prev.month, cur.month) : ''],
+      C.hasW ? [`Semana ${C.w}`, moneyShort(cur.week), prev && state.weekYears.has(P) ? foot(prev.week, cur.week) : ''] : [`Año completo ${P}`, prev ? moneyShort(prev.full) : '—', ''],
+      ['Participación Paraíso', sh == null ? '—' : fmtPct.format(sh), sh != null && shP != null ? `<span class="${dirCls(sh - shP)}">${ppTxt(sh - shP)}</span> vs ${P}` : ''],
+      ['Tiendas con venta', num(cur.stores.size), prev ? `${num(prev.stores.size)} en ${P}` : ''],
+    ];
+    $('#sumKpis').innerHTML = kpis.map(([l, v, f]) => `<div class="hk"><div class="hk-label">${l}</div><div class="hk-value">${v}</div><div class="hk-foot">${f}</div></div>`).join('');
+
+    renderSumMonths(F, R);
+    renderSumShare(F, R);
+    renderSumRanks(F, R);
+    renderSumDonut(F, R, sh, shP);
+    renderSumWeeks(F, R);
+    renderSumHeat(F);
+  }
+
+  function renderSumMonths(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const has = (y, m) => R.byYM.has(y * 100 + m);
+    const vals = (y, last) => MESES.map((_, i) => (i + 1 > last ? null : R.byYM.get(y * 100 + i + 1) || 0));
+    const cur = vals(Y, C.m), prev = state.years.includes(P) ? vals(P, 12) : null;
+    const partial = !!(C.d && C.d < new Date(Date.UTC(Y, C.m, 0)).getUTCDate());
+    $('#sumMonthNote').textContent = partial ? ` ${C.monthLabel} de ${Y} va al día ${C.d} (línea punteada).` : '';
+    let best = null;
+    if (prev) for (let m = 1; m <= (partial ? C.m - 1 : C.m); m++) { const x = varPct(cur[m - 1], prev[m - 1]); if (x != null && has(Y, m) && (!best || x > best.x)) best = { m, x }; }
+    $('#sumMonthTitle').textContent = best ? `${MESES_LARGO[best.m - 1]} fue el mejor mes frente a ${P} (${pct(best.x)})` : 'Mes a mes';
+    upsertChart('sm', 'chartSumMonths', {
+      type: 'line',
+      data: { labels: MESES, datasets: [
+        ...(prev ? [{ label: String(P), data: prev, borderColor: yearColor(P), backgroundColor: yearColor(P), borderWidth: 2, borderDash: [6, 5], pointRadius: 3, tension: 0.3 }] : []),
+        { label: String(Y), data: cur, borderColor: yearColor(Y), backgroundColor: 'rgba(61,107,255,.12)', fill: prev ? '-1' : 'origin', borderWidth: 3, pointRadius: 4, pointHoverRadius: 7, tension: 0.3,
+          segment: { borderDash: (c) => (partial && c.p1DataIndex === C.m - 1 ? [5, 5] : undefined) },
+          pointBackgroundColor: cur.map((_, i) => (partial && i === C.m - 1 ? '#fff' : yearColor(Y))) },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+        interaction: { mode: 'index', intersect: false },
+        onClick: (_e, els) => { if (els.length) goDetail({ months: [els[0].index + 1], by: 'cadena' }); },
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        plugins: {
+          legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, font: { weight: 600 } } },
+          tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}${partial && c.dataset.label === String(Y) && c.dataIndex === C.m - 1 ? ` (al día ${C.d})` : ''}`, footer: (it) => { const i = it[0].dataIndex; if (partial && i === C.m - 1) return 'Mes en curso: no se compara con el mes completo'; const x = prev ? varPct(cur[i], prev[i]) : null; return x == null || cur[i] == null ? '' : `Var: ${pct(x)}`; } } },
+        },
+        scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: '#EEF0F6' }, border: { display: false }, ticks: { callback: (v) => moneyShort(v) } } },
+      },
+    });
+  }
+
+  function renderSumShare(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const chains = [...R.byChain.values()].map((o) => ({ c: o.cadena, b: o.y[Y]?.ytd || 0, a: o.y[P]?.ytd || 0 })).filter((x) => x.a || x.b);
+    const TB = chains.reduce((s, x) => s + x.b, 0), TA = chains.reduce((s, x) => s + x.a, 0);
+    chains.sort((x, y) => y.b - x.b);
+    const top = chains.slice(0, 8), rest = chains.slice(8);
+    const items = [...top.map((x) => ({ ...x, color: chainColor(x.c) }))];
+    if (rest.length) items.push({ c: `Otras (${rest.length})`, b: rest.reduce((s, x) => s + x.b, 0), a: rest.reduce((s, x) => s + x.a, 0), color: '#CBD5E1', other: true });
+    const lead = items[0];
+    $('#sumShareTitle').textContent = lead && TB ? `${lead.c} concentra el ${fmtPct.format(lead.b / TB)} de la venta` : 'Cómo se reparte la venta';
+    const bar = (field, tot) => items.map((x) => {
+      const w = tot ? (x[field] / tot) * 100 : 0;
+      return w <= 0 ? '' : `<button class="share-seg" style="width:${w}%;background:${x.color}" ${x.other ? 'disabled' : `data-chain="${esc(x.c)}"`} title="${esc(x.c)}: ${fmtPct.format(x[field] / tot)} · ${money(x[field])}" aria-label="${esc(x.c)} ${fmtPct.format(x[field] / tot)}"></button>`;
+    }).join('');
+    const rows = [];
+    if (TA) rows.push(`<div class="share-row"><b>${P}</b><div class="share-bar">${bar('a', TA)}</div></div>`);
+    rows.push(`<div class="share-row"><b>${Y}</b><div class="share-bar">${bar('b', TB)}</div></div>`);
+    const list = items.map((x) => {
+      const sb = TB ? x.b / TB : 0, sa = TA ? x.a / TA : null;
+      const d = sa == null ? null : sb - sa, vp = varPct(x.b, x.a);
+      return `<li><span class="sw" style="background:${x.color}"></span>${x.other ? `<span class="nm">${esc(x.c)}</span>` : `<button class="nm" data-chain="${esc(x.c)}">${esc(x.c)}</button>`}<span class="sv">${moneyShort(x.b)}</span><span class="vp ${dirCls(vp)}">${vp == null ? 'nueva' : pct(vp)}</span><span class="sh">${fmtPct.format(sb)}</span><span class="pp ${dirCls(d)}">${ppTxt(d)}</span></li>`;
+    }).join('');
+    $('#sumShare').innerHTML = rows.join('') + `<div class="share-head"><span></span><span>Cadena</span><span>Venta ${Y}</span><span>Var %</span><span>Part.</span><span>vs ${P}</span></div><ul class="share-list">${list}</ul>`;
+  }
+
+  function renderSumRanks(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const st = [...R.byStore.values()].map((o) => ({ o, b: o.y[Y]?.ytd || 0, a: o.y[P]?.ytd || 0 })).map((x) => ({ ...x, d: x.b - x.a })).filter((x) => x.a || x.b);
+    const up = st.filter((x) => x.d > 0).sort((a, b) => b.d - a.d).slice(0, 8);
+    const down = st.filter((x) => x.d < 0).sort((a, b) => a.d - b.d).slice(0, 8);
+    const max = Math.max(1, ...up.map((x) => x.d), ...down.map((x) => -x.d));
+    const li = (x, i) => `<li><button data-chain="${esc(x.o.cadena)}" title="Ver las tiendas de ${esc(x.o.cadena)}"><span class="fill" style="--w:${(Math.abs(x.d) / max) * 100}%"></span><span class="pos">${i + 1}</span><span class="who"><b>${esc(x.o.tienda)}</b><small>${esc(x.o.cadena)}</small></span><span class="amt">${x.d > 0 ? '+' : ''}${moneyShort(x.d)}<small>${x.a ? pct(varPct(x.b, x.a)) : 'nueva'}</small></span></button></li>`;
+    $('#sumUp').innerHTML = up.map(li).join('') || '<li class="empty">Ninguna tienda crece con estos filtros.</li>';
+    $('#sumDown').innerHTML = down.map(li).join('') || '<li class="empty">Ninguna tienda cae con estos filtros.</li>';
+  }
+
+  function renderSumDonut(F, R, sh, shP) {
+    const card = $('#sumShareParaisoCard');
+    const Yo = R.byYear.get(F.C.y), Po = R.byYear.get(F.C.y - 1);
+    const show = state.hasBrand && !F.tipo && !F.brand && Yo.p.ytd + Yo.c.ytd > 0;
+    card.hidden = !show;
+    if (!show) return;
+    $('#sumParTitle').textContent = shP == null ? `Paraíso tiene el ${fmtPct.format(sh)} de la venta` : sh >= shP ? `Paraíso gana ${ppTxt(sh - shP).replace('+', '')} de participación` : `Paraíso pierde ${ppTxt(sh - shP).replace('-', '')} de participación`;
+    $('#sumDonutCenter').innerHTML = `<b>${fmtPct.format(sh)}</b><span>Paraíso</span>`;
+    const pv = (a, b) => (a ? pct(varPct(b, a)) : '—');
+    $('#sumDonutLegend').innerHTML = `
+      <li><span class="sw" style="background:${COL_PARAISO}"></span><div><b>Venta Paraíso · ${moneyShort(Yo.p.ytd)}</b><small>${Po ? `${pv(Po.p.ytd, Yo.p.ytd)} vs ${F.C.y - 1}` : ''} · PARAISO, VIVA-HOME, CASA JOVEN, KREA, KOMFORT</small></div></li>
+      <li><span class="sw" style="background:${COL_COMP}"></span><div><b>Venta Competencia · ${moneyShort(Yo.c.ytd)}</b><small>${Po ? `${pv(Po.c.ytd, Yo.c.ytd)} vs ${F.C.y - 1}` : ''} · todas las demás marcas</small></div></li>`;
+    upsertChart('sd', 'chartSumDonut', {
+      type: 'doughnut',
+      data: { labels: ['Venta Paraíso', 'Venta Competencia'], datasets: [{ data: [Yo.p.ytd, Yo.c.ytd], backgroundColor: [COL_PARAISO, COL_COMP], borderColor: '#fff', borderWidth: 3, hoverOffset: 6 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '72%', animation: { duration: 300 }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${money(c.parsed)}` } } } },
+    });
+  }
+
+  function renderSumWeeks(F, R) {
+    const C = F.C, Y = C.y, P = Y - 1;
+    const card = $('#chartSumWeeks').closest('.panel');
+    const ok = C.hasW && state.weekYears.has(Y) && state.weekYears.has(P);
+    card.hidden = !ok;
+    if (!ok) return;
+    const weeks = []; for (let w = Math.max(1, C.w - 7); w <= C.w; w++) weeks.push(w);
+    const v = weeks.map((w) => varPct(R.byYW.get(Y * 100 + w) || 0, R.byYW.get(P * 100 + w) || 0));
+    const last4 = weeks.slice(-4);
+    const s4b = last4.reduce((s, w) => s + (R.byYW.get(Y * 100 + w) || 0), 0), s4a = last4.reduce((s, w) => s + (R.byYW.get(P * 100 + w) || 0), 0);
+    const p4 = varPct(s4b, s4a);
+    $('#sumWeeksTitle').textContent = p4 == null ? 'Últimas semanas' : `Las últimas 4 semanas van ${pct(p4)} frente a ${P}`;
+    const m = Math.max(0.05, ...v.filter((x) => x != null).map(Math.abs)) * 1.2;
+    upsertChart('sw', 'chartSumWeeks', {
+      type: 'bar',
+      data: { labels: weeks.map((w) => `Sem ${w}`), datasets: [{ data: v.map((x) => (x == null ? null : x * 100)), backgroundColor: v.map((x) => (x == null ? '#E2E6F0' : x >= 0 ? '#14B88A' : '#F0475A')), borderRadius: 6, borderSkipped: false, barPercentage: 0.62 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+        onClick: (_e, els) => { if (els.length) goDetail({ weeks: [weeks[els[0].index]], by: 'cadena' }); },
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        layout: { padding: { top: 18 } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${pct(v[c.dataIndex])}` } }, wkLabels: { v } },
+        scales: { x: { grid: { display: false } }, y: { min: -m * 100, max: m * 100, grid: { color: (c) => (c.tick.value === 0 ? '#161A3A' : '#EEF0F6') }, border: { display: false }, ticks: { callback: (x) => (x > 0 ? '+' : '') + Math.round(x) + '%' } } },
+      },
+      plugins: [{
+        id: 'wkLabels',
+        afterDatasetsDraw(chart, _a, o) {
+          const { ctx } = chart; ctx.save();
+          ctx.font = '700 11.5px "Plus Jakarta Sans", sans-serif'; ctx.textAlign = 'center';
+          chart.getDatasetMeta(0).data.forEach((bar, i) => { const x = o.v[i]; if (x == null) return; ctx.fillStyle = x >= 0 ? '#0E8F6B' : '#D42E43'; ctx.fillText(pct(x), bar.x, x >= 0 ? bar.y - 6 : bar.y + 14); });
+          ctx.restore();
+        },
+      }],
+    });
+  }
+
+  // Calendario de calor: cada día del año actual vs el mismo día de la semana del año anterior (364 días antes).
+  async function renderSumHeat(F) {
+    const box = $('#sumHeat');
+    let data;
+    try { data = await loadCmp(); } catch { box.innerHTML = '<p class="muted">No se pudo cargar el detalle diario.</p>'; return; }
+    const C = F.C, Y = C.y, P = Y - 1;
+    const cobOk = (r) => F.cob === 'all' || !state.hasCob || (F.cob === 'si' ? r.cob === 1 : F.cob === 'no' ? r.cob === 0 : r.cob == null);
+    const day = new Map();
+    for (const r of data) {
+      if ((r.y !== Y && r.y !== P) || !(r.d > 0) || !cobOk(r) || (F.tipo && r.tipo !== F.tipo) || (F.chain && r.cadena !== F.chain) || (F.brand && r.marca !== F.brand)) continue;
+      const k = Date.UTC(r.y, r.m - 1, r.d);
+      day.set(k, (day.get(k) || 0) + r.v);
+    }
+    if (!day.size) { box.closest('.panel').hidden = true; return; }
+    box.closest('.panel').hidden = false;
+    const start = Date.UTC(Y, 0, 1), end = Date.UTC(Y, C.m - 1, C.d || new Date(Date.UTC(Y, C.m, 0)).getUTCDate());
+    const color = (x) => {
+      if (x == null) return '#E6E8F0';
+      const t = Math.min(1, Math.abs(x) / 0.4);
+      const mix = (a, b) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+      const base = [230, 232, 240];
+      const c = x >= 0 ? mix(base, [20, 184, 138]) : mix(base, [240, 71, 90]);
+      return `rgb(${c.join(',')})`;
+    };
+    const wd0 = (new Date(start).getUTCDay() + 6) % 7;
+    let html = '', col = 0, better = 0, counted = 0;
+    const cells = [];
+    for (let i = 0; i < wd0; i++) cells.push('<span class="hx"></span>');
+    const monthAt = {};
+    for (let t = start, idx = wd0; t <= end; t += 864e5, idx++) {
+      const d = new Date(t), b = day.get(t) || 0, a = day.get(t - 364 * 864e5);
+      const x = a ? varPct(b, a) : null;
+      if (x != null) { counted++; if (x > 0) better++; }
+      const c = Math.floor(idx / 7);
+      if (d.getUTCDate() === 1) monthAt[c] = MESES[d.getUTCMonth()];
+      const label = `${d.getUTCDate()} ${MESES[d.getUTCMonth()].toLowerCase()}`;
+      cells.push(b || a
+        ? `<button class="hd" style="--c:${color(x)}" data-t="${t}" data-b="${b}" data-a="${a ?? ''}" aria-label="${label}: ${money(b)}${x == null ? '' : ', ' + pct(x)}"></button>`
+        : `<span class="hd none" title="${label}: sin venta"></span>`);
+      col = c;
+    }
+    // Columnas: fila 1 = mes, filas 2..8 = lunes..domingo (con una primera columna de iniciales)
+    html += '<span class="hm"></span>' + ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => `<span class="hw">${d}</span>`).join('');
+    for (let c = 0; c <= col; c++) {
+      html += `<span class="hm">${monthAt[c] || ''}</span>`;
+      html += cells.slice(c * 7, c * 7 + 7).join('') + '<span class="hx"></span>'.repeat(Math.max(0, 7 - cells.slice(c * 7, c * 7 + 7).length));
+    }
+    box.innerHTML = html;
+    $('#sumHeatTitle').textContent = counted ? `${better} de ${counted} días vendieron más que el mismo día de ${P}` : 'El año día por día';
   }
 
   // ---------------------------------------------------------------- comparativa (segmentadores Mes / Semana / Día)
@@ -1697,6 +1944,20 @@
     ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', renderAll));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
+    $('#sumShare').addEventListener('click', (e) => { const b = e.target.closest('[data-chain]'); if (b) goDetail({ months: [lastF.C.m], days: lastF.C.d ? Array.from({ length: lastF.C.d }, (_, i) => i + 1) : [], by: 'tienda', chain: b.dataset.chain }); });
+    for (const id of ['#sumUp', '#sumDown']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-chain]'); if (b) goDetail({ months: [lastF.C.m], days: lastF.C.d ? Array.from({ length: lastF.C.d }, (_, i) => i + 1) : [], by: 'tienda', chain: b.dataset.chain }); });
+    const heat = $('#sumHeat'), tip = $('#heatTip');
+    heat.addEventListener('click', (e) => { const b = e.target.closest('.hd[data-t]'); if (!b) return; const d = new Date(+b.dataset.t); goDetail({ months: [d.getUTCMonth() + 1], days: [d.getUTCDate()], by: 'cadena' }); });
+    heat.addEventListener('mousemove', (e) => {
+      const b = e.target.closest('.hd[data-t]');
+      if (!b) { tip.hidden = true; return; }
+      const d = new Date(+b.dataset.t), bv = +b.dataset.b, av = b.dataset.a === '' ? null : +b.dataset.a;
+      const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+      tip.innerHTML = `<b>${dias[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES_LARGO[d.getUTCMonth()].toLowerCase()}</b><br>${money(bv)}${av == null ? '<br>Sin dato del año anterior' : `<br>${lastF.C.y - 1}: ${money(av)} · <b>${pct(varPct(bv, av))}</b>`}`;
+      tip.hidden = false;
+      tip.style.left = Math.min(window.innerWidth - 240, e.clientX + 14) + 'px'; tip.style.top = e.clientY + 14 + 'px';
+    });
+    heat.addEventListener('mouseleave', () => { tip.hidden = true; });
     $('#btnFilters').addEventListener('click', () => setDrawer(!$('#filterDrawer').classList.contains('open')));
     $('#btnFiltersClose').addEventListener('click', () => setDrawer(false));
     $('#drawerScrim').addEventListener('click', () => setDrawer(false));

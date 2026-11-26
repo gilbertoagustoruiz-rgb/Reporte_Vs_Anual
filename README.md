@@ -31,6 +31,13 @@ Las semanas van de lunes a domingo; la semana 1 es la que contiene el 1 de enero
 
 ## Pestañas
 
+- **Resumen** (se abre por defecto): el dashboard inicial, con todo de un vistazo. Cada bloque lleva un titular que se escribe solo con la conclusión, y casi todo es clicable para entrar al detalle en la Comparativa ya filtrada.
+  - Titular del acumulado al corte, mini barras por año e indicadores: acumulado, mes de corte (parejo con el año anterior), semana de corte, participación Paraíso y tiendas con venta.
+  - **Mes a mes** (año actual frente al anterior; el mes en curso va punteado) y **cómo se reparte la venta** por cadena (barras al 100 % de los dos años, con venta, Var % y puntos de participación).
+  - **El año día por día**: un calendario de calor donde cada día se compara con el mismo día de la semana del año anterior.
+  - **Tiendas que más crecen** y **que más caen**, lado a lado.
+  - **Paraíso frente a la competencia** (dona) y **últimas semanas** (Var % de las últimas 8 semanas).
+
 - **Comparativa**: igual que la tabla dinámica de Excel "COMPARATIVAS MES ACTUAL". Tiene segmentadores de **Mes**, **Semanas** y **Día** (clic para elegir uno; Ctrl + clic o "Selección múltiple" para varios) y tablas de **Soles** y **Unidades** del año actual frente al anterior, por cadena, por marca o por Paraíso vs Competencia, con su Var %. Por defecto muestra el mes de corte hasta el día de corte. Debajo, **por semana**: tablas de Soles y Unidades con columnas Sem-N × año, más su Var % y el total, y un gráfico de barras por semana para los últimos tres años, con la Var % del año actual frente al anterior sobre cada semana. Usa el detalle diario guardado en la tabla `ventas_dia`.
 
 - **Por año**: indicadores del año en curso frente al anterior (acumulado, mes de corte y semana de corte), gráficos por año y una tabla con todos los años, cada uno con su variación contra el año anterior.
