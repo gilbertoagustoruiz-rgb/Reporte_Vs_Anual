@@ -405,11 +405,15 @@
     <section id="view-admin" class="view">
       <header class="data-head">
         <div>
-          <h2>Usuarios y perfiles</h2>
-          <p class="muted">Crea cuentas y asígnales un perfil. Si el perfil no ve todo, define qué puede ver cada usuario: las tiendas de un coordinador, cadenas completas o tiendas puntuales (se suman).</p>
+          <h2 id="adminTitle">Usuarios y perfiles</h2>
+          <p class="muted" id="adminSub">Crea cuentas y asígnales un perfil. Si el perfil no ve todo, define qué puede ver cada usuario: las tiendas de un coordinador, cadenas completas o tiendas puntuales (se suman).</p>
+        </div>
+        <div class="seg" id="adminNav" role="tablist" aria-label="Secciones de administración">
+          <button type="button" class="on" data-admin-tab="usuarios">Usuarios y perfiles</button>
+          <button type="button" data-admin-tab="correo">Análisis y correo</button>
         </div>
       </header>
-      <div class="admin-grid">
+      <div class="admin-grid" id="adminUsuarios">
         <article class="panel">
           <div class="panel-head"><h3>Usuarios</h3><button class="btn btn-primary" id="btnNewUser" type="button">Nuevo usuario</button></div>
           <div class="table-wrap"><table id="tblAdminUsers" class="tbl cmp"></table></div>
@@ -418,6 +422,56 @@
           <div class="panel-head"><h3>Perfiles</h3><button class="btn" id="btnNewProfile" type="button">Nuevo perfil</button></div>
           <div class="profile-cards" id="profileCards"></div>
         </article>
+      </div>
+
+      <div class="mail-grid" id="adminCorreo" hidden>
+        <aside class="panel mail-side">
+          <h3>Qué analizar</h3>
+          <label>Período
+            <select id="mlPer">
+              <option value="ytd">Acumulado al corte</option>
+              <option value="month">Mes de corte</option>
+              <option value="week">Semana de corte</option>
+            </select>
+          </label>
+          <label>Cadena
+            <select id="mlChain"><option value="">Todas las cadenas</option></select>
+          </label>
+          <fieldset class="mail-secs">
+            <legend>Incluir en el correo</legend>
+            <label><input type="checkbox" data-sec="kpis" checked> Indicadores clave</label>
+            <label><input type="checkbox" data-sec="puntos" checked> Puntos del análisis</label>
+            <label><input type="checkbox" data-sec="cadenas" checked> Tabla por cadena</label>
+            <label><input type="checkbox" data-sec="tiendas" checked> Tiendas que más suben y bajan</label>
+            <label><input type="checkbox" data-sec="coord" checked> Coordinadores</label>
+            <label><input type="checkbox" data-sec="meses" checked> Mes a mes</label>
+          </fieldset>
+          <button type="button" class="btn" id="mlRegen">Volver a generar el análisis</button>
+
+          <h3 class="mail-h-send">Envío</h3>
+          <label>Para<input id="mlTo" type="text" inputmode="email" autocomplete="off" placeholder="gerencia@empresa.com, otro@empresa.com"></label>
+          <label>CC<input id="mlCc" type="text" inputmode="email" autocomplete="off" placeholder="Opcional"></label>
+          <label>Asunto<input id="mlSubject" type="text"></label>
+          <label class="mail-check"><input type="checkbox" id="mlAttach" checked> Adjuntar el Excel del análisis</label>
+          <p class="form-error" id="mlError" role="alert"></p>
+          <div class="mail-actions">
+            <button type="button" class="btn btn-primary" id="mlEml">Abrir borrador en Outlook</button>
+            <button type="button" class="btn" id="mlCopyOpen">Copiar y abrir mi correo</button>
+            <button type="button" class="btn btn-ghost" id="mlCopy">Solo copiar el correo</button>
+          </div>
+          <p class="muted mail-help"><b>Outlook:</b> descarga un borrador con el formato y el Excel adjunto; al abrirlo solo revisas y das Enviar.<br><b>Gmail u otro:</b> copia el correo con formato y abre uno nuevo con los destinatarios; pega con Ctrl+V y adjunta el Excel si lo necesitas.</p>
+        </aside>
+
+        <section class="mail-preview" aria-label="Vista previa del correo">
+          <div class="mail-meta">
+            <div><span>Para</span><b id="mlMetaTo">—</b></div>
+            <div><span>Asunto</span><b id="mlMetaSubject">—</b></div>
+            <div class="mail-state" id="mlState">Puedes escribir directamente en el correo para ajustar el texto.</div>
+          </div>
+          <div class="mail-paper">
+            <div id="mlBody" class="mail-body" contenteditable="true" spellcheck="true"></div>
+          </div>
+        </section>
       </div>
     </section>
   </main>

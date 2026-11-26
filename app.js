@@ -1305,6 +1305,325 @@
     });
   }
 
+  // ---------------------------------------------------------------- análisis y correo (administración)
+  // Arma un correo con el análisis del último corte para revisarlo, editarlo y enviarlo desde el correo del administrador.
+  const mail = { loaded: false, edited: false, subjEdited: false, key: '', sheets: [], usersSub: '' };
+  const EMAIL_OK = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
+  const mailList = (v) => String(v || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+
+  function setAdminTab(t) {
+    $$('#adminNav [data-admin-tab]').forEach((b) => b.classList.toggle('on', b.dataset.adminTab === t));
+    $('#adminUsuarios').hidden = t !== 'usuarios';
+    $('#adminCorreo').hidden = t !== 'correo';
+    $('#adminTitle').textContent = t === 'correo' ? 'Análisis y correo' : 'Usuarios y perfiles';
+    $('#adminSub').textContent = t === 'correo'
+      ? 'El análisis se arma solo con el último corte de la base. Revísalo, cambia el texto si quieres y envíalo desde tu correo.'
+      : mail.usersSub;
+    if (t === 'correo') openMail();
+  }
+
+  const mailSecs = () => new Set($$('#adminCorreo [data-sec]').filter((c) => c.checked).map((c) => c.dataset.sec));
+  const mailKey = () => { const c = state.cut || {}; return [c.y, c.m, c.w, c.d, $('#mlPer').value, $('#mlChain').value, [...mailSecs()].join('.')].join('|'); };
+
+  async function openMail() {
+    if (!state.records.length || !state.cut) {
+      $('#mlBody').innerHTML = '<p style="padding:28px;font-family:Segoe UI,Arial,sans-serif">Todavía no hay datos en la base para analizar. Sube los archivos en la pestaña Datos.</p>';
+      return;
+    }
+    const sel = $('#mlChain'), keep = sel.value;
+    const chains = [...new Set(state.records.map((r) => r.cadena))].filter(Boolean).sort();
+    sel.innerHTML = '<option value="">Todas las cadenas</option>' + chains.map((c) => `<option>${esc(c)}</option>`).join('');
+    sel.value = chains.includes(keep) ? keep : '';
+    const wk = $('#mlPer').querySelector('[value=week]');
+    wk.disabled = !state.cut.w; if (wk.disabled && $('#mlPer').value === 'week') $('#mlPer').value = 'ytd';
+    if (!mail.loaded) {
+      mail.loaded = true;
+      try { const r = await api('/api/correo'); $('#mlTo').value = r.para.join(', '); $('#mlCc').value = r.cc.join(', '); } catch { /* sin destinatarios guardados */ }
+      const d = store.get('mailDraft', null);
+      if (d) {
+        if (d.per) $('#mlPer').value = d.per;
+        if (d.chain != null && chains.includes(d.chain)) $('#mlChain').value = d.chain;
+        if (d.secs) $$('#adminCorreo [data-sec]').forEach((c) => (c.checked = d.secs.includes(c.dataset.sec)));
+      }
+      if (d && d.key === mailKey() && d.html) {
+        await genMail(); // arma el Excel y el asunto por defecto con los datos actuales
+        $('#mlBody').innerHTML = d.html;
+        if (d.subject) { $('#mlSubject').value = d.subject; mail.subjEdited = true; }
+        mail.edited = true; setMailState();
+        syncMailMeta();
+        return;
+      }
+    }
+    if (!mail.edited || mail.key !== mailKey()) await genMail();
+    syncMailMeta();
+  }
+
+  function setMailState(msg) {
+    const el = $('#mlState');
+    el.classList.toggle('edited', !!(msg || mail.edited));
+    el.textContent = msg || (mail.edited ? 'Editaste el texto. Tus cambios se guardan en este navegador hasta que lo envíes o lo vuelvas a generar.' : 'Puedes escribir directamente en el correo para ajustar el texto.');
+  }
+  function syncMailMeta() {
+    const to = mailList($('#mlTo').value), cc = mailList($('#mlCc').value);
+    $('#mlMetaTo').textContent = to.length ? to.join(', ') + (cc.length ? `  ·  CC: ${cc.join(', ')}` : '') : 'Sin destinatarios todavía';
+    $('#mlMetaSubject').textContent = $('#mlSubject').value || '—';
+  }
+  function saveDraft() {
+    store.set('mailDraft', { key: mailKey(), html: $('#mlBody').innerHTML, subject: mail.subjEdited ? $('#mlSubject').value : '', per: $('#mlPer').value, chain: $('#mlChain').value, secs: [...mailSecs()] });
+  }
+
+  async function genMail() {
+    const C = cutInfo(), Y = C.y, P = Y - 1;
+    let per = $('#mlPer').value; if (per === 'week' && !C.hasW) per = 'ytd';
+    const chain = $('#mlChain').value, secs = mailSecs();
+    const years = state.years.filter((y) => y <= C.y);
+    const recs = state.records.filter((r) => r.y <= C.y && (!chain || r.cadena === chain));
+    const F = { C, from: years[0], years, chain, brand: '', tipo: '', cob: 'all', showShare: state.hasBrand, recs };
+    const R = compute(F);
+    const cur = R.byYear.get(Y), prev = R.byYear.get(P);
+    if (!cur) { $('#mlBody').innerHTML = '<p style="padding:28px">No hay ventas para esta selección.</p>'; return; }
+    const wkBoth = C.hasW && state.weekYears.has(Y) && state.weekYears.has(P);
+    const mes = C.monthLabel.toLowerCase();
+    const perTxt = per === 'week' ? `semana ${C.w}` : per === 'month' ? `mes de ${mes}${C.d ? ` (hasta el ${C.d})` : ''}` : (C.hasW && state.weekYears.has(Y) ? `acumulado de la semana 1 a la ${C.w}` : `acumulado de enero a ${mes}`);
+    const perShort = per === 'week' ? `Semana ${C.w}` : per === 'month' ? C.monthLabel : 'Acumulado';
+
+    // Coordinadores: se piden al servidor con el mismo período (año anterior hasta la misma semana).
+    let coord = null;
+    if (secs.has('coord')) {
+      const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
+      const body = { anios: [P, Y], por: 'coordinador', cadena: chain || undefined };
+      if (per === 'week') body.semanas = [C.w];
+      else if (per === 'month') { body.meses = [C.m]; if (wkBoth) body.semanas = upTo(C.w); }
+      else if (wkBoth) body.semanas = upTo(C.w); else body.meses = upTo(C.m);
+      try {
+        const r = await api('/api/comparativa', { method: 'POST', body });
+        const m = new Map();
+        for (const x of r.rows) {
+          if (!x.coordinador) continue;
+          const o = m.get(x.coordinador) || { n: x.coordinador, a: 0, b: 0 };
+          if (x.anio === Y) o.b += x.v; else o.a += x.v;
+          m.set(x.coordinador, o);
+        }
+        coord = [...m.values()].filter((o) => o.a || o.b).sort((x, y) => y.b - x.b);
+      } catch { coord = null; }
+    }
+
+    const v = (o) => (o ? o[per] || 0 : 0);
+    const A = v(prev), B = v(cur), d = B - A, p = prev ? varPct(B, A) : null;
+    const pA = prev ? prev.p[per] : 0, pB = cur.p[per], cA = prev ? prev.c[per] : 0, cB = cur.c[per];
+    const shA = pA + cA ? pA / (pA + cA) : null, shB = pB + cB ? pB / (pB + cB) : null;
+    const chains = [...R.byChain.values()].map((o) => ({ n: o.cadena, a: o.y[P]?.[per] || 0, b: o.y[Y]?.[per] || 0, pb: o.yp[Y]?.[per] || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a })).sort((x, y) => y.b - x.b);
+    const stores = [...R.byStore.values()].map((o) => ({ n: o.tienda, c: o.cadena, a: o.y[P]?.[per] || 0, b: o.y[Y]?.[per] || 0 })).filter((x) => x.a || x.b).map((x) => ({ ...x, d: x.b - x.a }));
+    const up = stores.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), down = stores.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+    const nuevas = stores.filter((x) => !x.a && x.b).length, perdidas = stores.filter((x) => x.a && !x.b).length;
+    const months = [];
+    for (let m = 1; m <= C.m; m++) {
+      const a = m === C.m ? prev?.month || 0 : R.byYM.get(P * 100 + m) || 0, b = m === C.m ? cur.month : R.byYM.get(Y * 100 + m) || 0;
+      if (a || b) months.push({ m, n: MESES_LARGO[m - 1] + (m === C.m ? ' (al corte)' : ''), a, b, p: varPct(b, a) });
+    }
+
+    // Estilos en línea: así el formato se mantiene al pegar en Outlook o Gmail.
+    const FONT = 'font-family:Segoe UI,Arial,Helvetica,sans-serif;';
+    const NIGHT = '#1B1F4B', GOOD = '#0E8F6B', BAD = '#D42E43', MUTED = '#6B7190';
+    const col = (x) => (x > 0 ? GOOD : x < 0 ? BAD : MUTED);
+    const strong = (x, t) => `<span style="color:${col(x)};font-weight:700">${t}</span>`;
+    const pctC = (x) => (x == null || !isFinite(x) ? '—' : strong(x, pct(x)));
+    const ppC = (x) => strong(x, ppTxt(x));
+    const moneyC = (x) => strong(x, signMoney(x));
+    const share = (x) => (x == null ? '—' : fmtPct.format(x));
+    const h2 = (t) => `<h2 style="${FONT}font-size:16px;color:${NIGHT};margin:28px 0 10px">${t}</h2>`;
+    const table = (head, rows, foot) => {
+      const cell = (t, i, extra) => `<td style="padding:7px 10px;font-size:13px;border-bottom:1px solid #E2E6F0;text-align:${i ? 'right' : 'left'};white-space:${i ? 'nowrap' : 'normal'};${extra}">${t}</td>`;
+      return `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;${FONT}color:#2B3050"><tr>${head.map((h, i) => `<th style="background:${NIGHT};color:#fff;padding:8px 10px;font-size:12px;font-weight:600;text-align:${i ? 'right' : 'left'};white-space:nowrap">${h}</th>`).join('')}</tr>`
+        + rows.map((r, ri) => `<tr>${r.map((c, i) => cell(c, i, ri % 2 ? 'background:#F8F9FD;' : '')).join('')}</tr>`).join('')
+        + (foot ? `<tr>${foot.map((c, i) => cell(c, i, `font-weight:700;background:#E9ECF5;`)).join('')}</tr>` : '') + '</table>';
+    };
+
+    // Puntos del análisis (en lenguaje simple).
+    const pts = [];
+    pts.push(`<b>Resultado:</b> en el ${perTxt} de ${Y} vendimos ${money(B)}${p == null ? '.' : `, ${pctC(p)} frente a ${P} (${moneyC(d)}).`}${per !== 'week' && wkBoth ? ` Para comparar parejo, ${P} se cuenta hasta la misma semana.` : ''}`);
+    if (state.hasBrand && shB != null) {
+      pts.push(`<b>Paraíso vs competencia:</b> la venta Paraíso ${pA ? `va ${pctC(varPct(pB, pA))}` : `suma ${money(pB)}`} y la competencia ${cA ? `va ${pctC(varPct(cB, cA))}` : `suma ${money(cB)}`}. La participación Paraíso ${shA != null ? `pasa de ${share(shA)} a ${share(shB)} (${ppC(shB - shA)})` : `es ${share(shB)}`}.`);
+    }
+    if (!chain && chains.length > 1) {
+      const cu = chains.filter((x) => x.d > 0).sort((a, b) => b.d - a.d), cd = chains.filter((x) => x.d < 0).sort((a, b) => a.d - b.d);
+      pts.push(`<b>Cadenas:</b> ${cu.length} de ${chains.length} crecen.`
+        + (cu[0] ? ` La que más suma es ${esc(cu[0].n)} (${moneyC(cu[0].d)}${cu[0].a ? `, ${pctC(varPct(cu[0].b, cu[0].a))}` : ''}).` : '')
+        + (cd[0] ? ` La que más resta es ${esc(cd[0].n)} (${moneyC(cd[0].d)}, ${pctC(varPct(cd[0].b, cd[0].a))}).` : ''));
+    }
+    if (stores.length) {
+      pts.push(`<b>Tiendas:</b> ${up.length} crecen y ${down.length} caen${nuevas || perdidas ? `; ${nuevas} venden solo en ${Y} y ${perdidas} vendieron en ${P} pero no en ${Y}` : ''}.`
+        + (up[0] ? ` La que más sube es ${esc(up[0].n)} (${esc(up[0].c)}, ${moneyC(up[0].d)}).` : '')
+        + (down[0] ? ` La que más baja es ${esc(down[0].n)} (${esc(down[0].c)}, ${moneyC(down[0].d)}).` : ''));
+    }
+    if (coord) {
+      const cv = coord.filter((o) => o.a > 0).map((o) => ({ ...o, p: varPct(o.b, o.a) }));
+      if (cv.length > 1) {
+        const best = cv.reduce((m, x) => (x.p > m.p ? x : m)), worst = cv.reduce((m, x) => (x.p < m.p ? x : m));
+        pts.push(`<b>Coordinadores:</b> ${cv.filter((x) => x.p > 0).length} de ${cv.length} crecen. La mejor variación es de ${esc(best.n)} (${pctC(best.p)}) y la más baja de ${esc(worst.n)} (${pctC(worst.p)}).`);
+      }
+    }
+    if (per === 'ytd') {
+      const mv = months.filter((x) => x.p != null);
+      if (mv.length > 1) {
+        const best = mv.reduce((m, x) => (x.p > m.p ? x : m)), worst = mv.reduce((m, x) => (x.p < m.p ? x : m));
+        pts.push(`<b>Meses:</b> el mejor mes frente a ${P} fue ${best.n.toLowerCase()} (${pctC(best.p)}) y el más flojo ${worst.n.toLowerCase()} (${pctC(worst.p)}).`);
+      }
+    }
+
+    const head = p == null ? `En ${Y} vamos ${moneyShort(B)}` : `${Y} ${d >= 0 ? 'crece' : 'cae'} ${pct(p)} frente a ${P}`;
+    const hdCol = p == null ? '#fff' : d >= 0 ? '#7CF0C8' : '#FF9AA6';
+    const tiles = [
+      [`${perShort} ${Y}`, moneyShort(B), prev ? `${pctC(p)} vs ${P}` : ''],
+      ['Diferencia', `${d > 0 ? '+' : ''}${moneyShort(d)}`, prev ? `${moneyShort(A)} en ${P}` : ''],
+    ];
+    if (state.hasBrand && shB != null) tiles.push(['Participación Paraíso', share(shB), shA != null ? `${ppC(shB - shA)} vs ${P}` : '']);
+    tiles.push(['Tiendas con venta', num(stores.filter((x) => x.b).length), prev ? `${num(stores.filter((x) => x.a).length)} en ${P}` : '']);
+    const kpis = `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:8px 0;width:100%;margin:18px 0 0 -8px;${FONT}"><tr>${tiles.map(([l, val, f]) => `<td style="width:${Math.floor(100 / tiles.length)}%;padding:12px 14px;background:#F2F4FB;border-radius:8px;vertical-align:top"><div style="font-size:11.5px;color:${MUTED}">${l}</div><div style="font-size:20px;font-weight:800;color:${NIGHT};margin:4px 0 2px;white-space:nowrap">${val}</div><div style="font-size:12px;color:${MUTED}">${f}</div></td>`).join('')}</tr></table>`;
+
+    const parts = [];
+    parts.push(`<div style="background:${NIGHT};color:#fff;padding:24px 28px;border-radius:6px 6px 0 0;${FONT}">
+      <div style="font-size:12px;color:#C9CEEA">Reporte Vs Anual · Corte ${esc(C.dateText)}${C.hasW ? ` · semana ${C.w}` : ''}${chain ? ` · Cadena ${esc(chain)}` : ''}</div>
+      <div style="font-size:24px;font-weight:800;margin-top:8px;line-height:1.25">${esc(head).replace(pct(p), `<span style="color:${hdCol}">${pct(p)}</span>`)}</div>
+      <div style="font-size:13.5px;color:#DDE1F5;margin-top:6px">${esc(perTxt.charAt(0).toUpperCase() + perTxt.slice(1))}: ${money(B)} en ${Y}${prev ? ` vs ${money(A)} en ${P}` : ''}</div>
+    </div>`);
+    const inner = [];
+    inner.push('<p style="margin:0 0 10px">Hola equipo,</p>');
+    inner.push(`<p style="margin:0">Les comparto el análisis del ${perTxt} de ${Y} frente al mismo corte de ${P}${chain ? ` en ${esc(chain)}` : ''}.</p>`);
+    if (secs.has('kpis')) inner.push(kpis);
+    if (secs.has('puntos') && pts.length) inner.push(h2('Lo más importante') + `<ul style="margin:0;padding-left:20px">${pts.map((t) => `<li style="margin:0 0 8px">${t}</li>`).join('')}</ul>`);
+    if (secs.has('cadenas') && chains.length && !chain) {
+      const TA = chains.reduce((s, x) => s + x.a, 0), TB = chains.reduce((s, x) => s + x.b, 0);
+      const top = chains.slice(0, 15), rest = chains.slice(15);
+      const rows = top.map((x) => [esc(x.n), money(x.a), money(x.b), pctC(varPct(x.b, x.a)), share(TB ? x.b / TB : null)]);
+      if (rest.length) { const a = rest.reduce((s, x) => s + x.a, 0), b = rest.reduce((s, x) => s + x.b, 0); rows.push([`Otras ${rest.length} cadenas`, money(a), money(b), pctC(varPct(b, a)), share(TB ? b / TB : null)]); }
+      inner.push(h2('Por cadena') + table(['Cadena', String(P), String(Y), 'Var %', `Peso ${Y}`], rows, ['Total', money(TA), money(TB), pctC(varPct(TB, TA)), TB ? '100%' : '—']));
+    }
+    if (secs.has('tiendas') && (up.length || down.length)) {
+      const rows = (arr) => arr.slice(0, 5).map((x) => [`${esc(x.n)} <span style="color:${MUTED}">· ${esc(x.c)}</span>`, money(x.a), money(x.b), moneyC(x.d)]);
+      if (up.length) inner.push(h2('Las tiendas que más suben') + table(['Tienda', String(P), String(Y), 'Diferencia'], rows(up)));
+      if (down.length) inner.push(h2('Las tiendas que más bajan') + table(['Tienda', String(P), String(Y), 'Diferencia'], rows(down)));
+    }
+    if (secs.has('coord') && coord?.length) {
+      inner.push(h2('Por coordinador') + table(['Coordinador', String(P), String(Y), 'Var %'], coord.map((o) => [esc(o.n), money(o.a), money(o.b), pctC(varPct(o.b, o.a))])));
+    }
+    if (secs.has('meses') && months.length > 1) {
+      inner.push(h2(`Mes a mes ${Y} vs ${P}`) + table(['Mes', String(P), String(Y), 'Var %'], months.map((x) => [x.n, money(x.a), money(x.b), pctC(x.p)])));
+    }
+    inner.push(`<p style="margin:26px 0 0">Pueden ver el detalle completo en el <a href="${esc(location.origin + location.pathname)}" style="color:#3D6BFF">Reporte Vs Anual</a>.</p>`);
+    inner.push(`<p style="margin:16px 0 0">Saludos,<br>${esc(session.user?.nombre || '')}</p>`);
+    parts.push(`<div style="padding:22px 28px 28px;${FONT}color:#2B3050;font-size:14px;line-height:1.55">${inner.join('\n')}</div>`);
+    $('#mlBody').innerHTML = parts.join('\n');
+
+    // Asunto por defecto (si el administrador no lo cambió a mano).
+    const subj = `Reporte Vs Anual · ${perShort} al ${C.dateText}${chain ? ` · ${chain}` : ''}: ${Y} ${p == null ? moneyShort(B) : pct(p) + ' vs ' + P}`;
+    if (!mail.subjEdited) $('#mlSubject').value = subj;
+
+    // Excel adjunto con las mismas cifras.
+    const plain = (h) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    const sheets = [{ name: 'Análisis', title: `Análisis · ${perShort} ${Y} vs ${P}`, lines: pts.map(plain) }];
+    const kp = [[`Venta (${perShort.toLowerCase()})`, A, B], ['Venta Paraíso', pA, pB], ['Venta Competencia', cA, cB]].filter((r, i) => i === 0 || state.hasBrand);
+    sheets.push({ name: 'Indicadores', title: 'Indicadores clave', T: { head: ['Indicador', String(P), String(Y), 'Var S/', 'Var %'], rows: kp.map(([l, a, b]) => [l, a, b, b - a, varPct(b, a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    if (!chain && chains.length) sheets.push({ name: 'Cadenas', title: 'Por cadena', T: { head: ['Cadena', String(P), String(Y), 'Var S/', 'Var %'], rows: chains.map((x) => [x.n, x.a, x.b, x.d, varPct(x.b, x.a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    if (stores.length) sheets.push({ name: 'Tiendas', title: 'Tiendas ordenadas por diferencia', T: { head: ['Cadena', 'Tienda', String(P), String(Y), 'Var S/', 'Var %'], rows: [...stores].sort((a, b) => b.d - a.d).map((x) => [x.c, x.n, x.a, x.b, x.d, varPct(x.b, x.a)]), foot: [], types: ['t', 't', '$', '$', '$', '%'] } });
+    if (coord?.length) sheets.push({ name: 'Coordinadores', title: 'Por coordinador', T: { head: ['Coordinador', String(P), String(Y), 'Var S/', 'Var %'], rows: coord.map((o) => [o.n, o.a, o.b, o.b - o.a, varPct(o.b, o.a)]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    if (months.length) sheets.push({ name: 'Mes a mes', title: `Mes a mes ${Y} vs ${P}`, T: { head: ['Mes', String(P), String(Y), 'Var S/', 'Var %'], rows: months.map((x) => [x.n, x.a, x.b, x.b - x.a, x.p]), foot: [], types: ['t', '$', '$', '$', '%'] } });
+    mail.sheets = sheets;
+    mail.sub = `Análisis ${perShort.toLowerCase()} · Corte ${C.dateText}${C.hasW ? ` (semana ${C.w})` : ''}${chain ? ` · Cadena ${chain}` : ''}`;
+    mail.key = mailKey(); mail.edited = false;
+    store.set('mailDraft', null);
+    setMailState(); syncMailMeta();
+  }
+
+  // ---- envío
+  function checkRecipients() {
+    const bad = [...mailList($('#mlTo').value), ...mailList($('#mlCc').value)].filter((e) => !EMAIL_OK.test(e));
+    $('#mlError').textContent = bad.length ? `Revisa estos correos: ${bad.slice(0, 3).join(', ')}.` : '';
+    return !bad.length;
+  }
+  let saveRcptTimer;
+  function saveRecipients() {
+    syncMailMeta();
+    clearTimeout(saveRcptTimer);
+    if (!checkRecipients()) return;
+    saveRcptTimer = setTimeout(async () => {
+      try { await api('/api/correo', { method: 'POST', body: { para: $('#mlTo').value, cc: $('#mlCc').value } }); } catch (e) { $('#mlError').textContent = e.message; }
+    }, 600);
+  }
+  const mailHtml = () => `<div style="max-width:680px;margin:0 auto;background:#ffffff">${$('#mlBody').innerHTML}</div>`;
+  const b64bytes = (bytes) => { let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+  const b64text = (t) => b64bytes(new TextEncoder().encode(t));
+  const wrap76 = (b) => b.replace(/.{1,76}/g, '$&\r\n');
+
+  async function mailEml() {
+    if (!checkRecipients()) return;
+    const to = mailList($('#mlTo').value), cc = mailList($('#mlCc').value);
+    if (!to.length && !confirm('El correo no tiene destinatarios. ¿Descargar el borrador igual? Podrás agregarlos en Outlook.')) return;
+    const subject = $('#mlSubject').value.trim() || 'Reporte Vs Anual';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:16px;background:#EEF1F8">${mailHtml()}</body></html>`;
+    const bnd = 'rva_' + Math.random().toString(36).slice(2);
+    const headers = [to.length ? `To: ${to.join(', ')}` : null, cc.length ? `Cc: ${cc.join(', ')}` : null, `Subject: =?UTF-8?B?${b64text(subject)}?=`, 'X-Unsent: 1', 'MIME-Version: 1.0'].filter(Boolean);
+    const htmlPart = ['Content-Type: text/html; charset="utf-8"', 'Content-Transfer-Encoding: base64', '', wrap76(b64text(html))].join('\r\n');
+    let eml;
+    if ($('#mlAttach').checked && mail.sheets.length) {
+      toast('Preparando el borrador con el Excel…');
+      const buf = new Uint8Array(await workbookBuffer(mail.sheets, mail.sub));
+      const fname = `Analisis_Vs_Anual_${stamp()}.xlsx`;
+      eml = [...headers, `Content-Type: multipart/mixed; boundary="${bnd}"`, '', `--${bnd}`, htmlPart,
+        `--${bnd}`, `Content-Type: ${XLSX_MIME}; name="${fname}"`, `Content-Disposition: attachment; filename="${fname}"`, 'Content-Transfer-Encoding: base64', '', wrap76(b64bytes(buf)), `--${bnd}--`, ''].join('\r\n');
+    } else {
+      eml = [...headers, htmlPart, ''].join('\r\n');
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([eml], { type: 'message/rfc822' }));
+    a.download = `Correo_Analisis_Vs_Anual_${stamp()}.eml`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    toast('Borrador descargado. Ábrelo: Outlook lo muestra listo para revisar y dar Enviar.');
+  }
+
+  async function copyMail() {
+    const html = mailHtml(), text = $('#mlBody').innerText;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+    } catch {
+      const r = document.createRange(); r.selectNodeContents($('#mlBody'));
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); document.execCommand('copy'); sel.removeAllRanges();
+    }
+    return true;
+  }
+  async function mailCopyOpen() {
+    if (!checkRecipients()) return;
+    await copyMail();
+    const to = mailList($('#mlTo').value), cc = mailList($('#mlCc').value);
+    const q = [cc.length ? 'cc=' + encodeURIComponent(cc.join(',')) : null, 'subject=' + encodeURIComponent($('#mlSubject').value.trim()), 'body=' + encodeURIComponent('(Pega aquí el análisis con Ctrl+V)')].filter(Boolean).join('&');
+    toast('Correo copiado. En el correo nuevo borra la línea de ayuda y pega con Ctrl+V.');
+    location.href = `mailto:${to.map(encodeURIComponent).join(',')}?${q}`;
+  }
+
+  function initMail() {
+    mail.usersSub = $('#adminSub').textContent;
+    $('#adminNav').addEventListener('click', (e) => { const b = e.target.closest('[data-admin-tab]'); if (b) setAdminTab(b.dataset.adminTab); });
+    let draftTimer;
+    $('#mlBody').addEventListener('input', () => { mail.edited = true; setMailState(); clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); });
+    const onScope = () => {
+      if (!mail.edited) { genMail(); return; }
+      setMailState('Cambiaste qué analizar. Pulsa "Volver a generar el análisis" para actualizar el correo (se reemplaza el texto que editaste).');
+    };
+    $('#mlPer').addEventListener('change', onScope);
+    $('#mlChain').addEventListener('change', onScope);
+    $$('#adminCorreo [data-sec]').forEach((c) => c.addEventListener('change', onScope));
+    $('#mlRegen').addEventListener('click', () => {
+      if (mail.edited && !confirm('Se reemplazará el texto que editaste por un análisis nuevo. ¿Continuar?')) return;
+      genMail();
+    });
+    $('#mlSubject').addEventListener('input', () => { mail.subjEdited = !!$('#mlSubject').value.trim(); syncMailMeta(); saveDraft(); });
+    $('#mlTo').addEventListener('input', saveRecipients);
+    $('#mlCc').addEventListener('input', saveRecipients);
+    $('#mlEml').addEventListener('click', () => mailEml().catch((e) => toast(e.message)));
+    $('#mlCopyOpen').addEventListener('click', () => mailCopyOpen().catch((e) => toast(e.message)));
+    $('#mlCopy').addEventListener('click', async () => { await copyMail(); toast('Correo copiado con formato. Pégalo con Ctrl+V en tu correo.'); });
+  }
+
   // ---------------------------------------------------------------- por año: titular y línea de tiempo
   function renderAnual(F, R) {
     const C = F.C, Y = C.y, P = Y - 1;
@@ -2128,11 +2447,20 @@
     const sheets = sheetsForView();
     if (!sheets.length) return toast('Esta pestaña no tiene tablas para descargar.');
     toast('Preparando el Excel…');
+    const buf = await workbookBuffer(sheets, `${VIEW_NAME[state.view]} · ${cutLine()}${scopeText()}`);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], { type: XLSX_MIME }));
+    a.download = `Reporte_Vs_Anual_${VIEW_NAME[state.view].replace(/\s/g, '_')}_${stamp()}.xlsx`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  // Arma el Excel con el formato del reporte (título, subtítulo, cabecera oscura, cebra, % en verde/rojo).
+  async function workbookBuffer(sheets, sub) {
     await loadScript('vendor/exceljs.min.js');
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Reporte Vs Anual';
     const NIGHT = 'FF1B1F4B', ZEBRA = 'FFF8F9FD', GOOD = 'FF0E8F6B', BAD = 'FFD42E43';
-    const sub = `${VIEW_NAME[state.view]} · ${cutLine()}${scopeText()}`;
     for (const sh of sheets) {
       const ws = wb.addWorksheet(sh.name.slice(0, 31), { views: [{ showGridLines: false }] });
       ws.getCell('A1').value = sh.title; ws.getCell('A1').font = { name: 'Calibri', size: 16, bold: true, color: { argb: NIGHT } };
@@ -2159,11 +2487,7 @@
       ws.views = [{ showGridLines: false, state: 'frozen', ySplit: hr }];
       if (T.rows.length) ws.autoFilter = { from: { row: hr, column: 1 }, to: { row: hr + T.rows.length, column: T.head.length } };
     }
-    const buf = await wb.xlsx.writeBuffer();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    a.download = `Reporte_Vs_Anual_${VIEW_NAME[state.view].replace(/\s/g, '_')}_${stamp()}.xlsx`;
-    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return wb.xlsx.writeBuffer();
   }
 
   // PDF: captura la pestaña tal como se ve y la reparte en hojas A4 horizontales sin cortar los bloques.
@@ -2276,7 +2600,7 @@
     $('#analysis').hidden = v === 'datos' || v === 'admin';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
     if (v === 'comparativa') renderCmp();
-    if (v === 'admin') loadAdmin();
+    if (v === 'admin') { loadAdmin(); if (!$('#adminCorreo').hidden) openMail(); }
     requestAnimationFrame(() => requestAnimationFrame(() => Object.values(state.charts).forEach((c) => c.resize())));
     window.scrollTo({ top: 0 });
   }
@@ -2424,6 +2748,7 @@
       } catch (x) { err.textContent = x.message; } finally { btn.disabled = false; btn.textContent = 'Ingresar'; }
     });
     initAdmin();
+    initMail();
   }
 
   // Exponer funciones de parseo para pruebas automáticas.

@@ -167,3 +167,15 @@ Otra forma: **New → Static Site**, con *Build command* vacío y *Publish direc
 | `app.js` | Lectura de archivos, detección de columnas, corte de evaluación, cálculos, gráficos y exportación |
 | `vendor/` | Copias locales de SheetJS (lector de Excel) y Chart.js. SheetJS se intenta cargar primero en su versión más reciente desde su CDN oficial |
 | `render.yaml` | Configuración para publicar en Render |
+
+## Análisis y correo (Administración)
+
+En **Administración → Análisis y correo** el reporte arma solo un correo con el análisis del último corte:
+titular, indicadores, puntos clave en lenguaje simple, tabla por cadena, tiendas que más suben y bajan,
+coordinadores y mes a mes. Se puede elegir el período (acumulado, mes o semana de corte), una cadena y qué secciones incluir.
+
+- El texto se puede editar directamente en la vista previa; los cambios se guardan en el navegador hasta enviarlo.
+- **Abrir borrador en Outlook** descarga un `.eml` con el formato y el Excel del análisis adjunto; Outlook lo abre listo para dar Enviar.
+- **Copiar y abrir mi correo** copia el correo con formato y abre uno nuevo con los destinatarios y el asunto (para Gmail u otro).
+- Los destinatarios (Para y CC) se guardan en la base (tabla `ajustes`), así que aparecen en cualquier equipo.
+- El correo sale desde la cuenta del administrador; la app no guarda claves de correo.

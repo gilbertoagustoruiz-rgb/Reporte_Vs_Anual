@@ -156,6 +156,8 @@ async function migrate() {
       SELECT dni, 'coordinador', coordinador FROM ${SCHEMA}.usuarios WHERE coordinador <> '' ON CONFLICT DO NOTHING;
     UPDATE ${SCHEMA}.usuarios SET coordinador = '' WHERE coordinador <> '';
   `);
+  // Ajustes simples (clave → valor), por ejemplo los destinatarios del correo de análisis.
+  await pool.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA}.ajustes (clave text PRIMARY KEY, valor jsonb NOT NULL, actualizado timestamptz NOT NULL DEFAULT now())`);
   // Usuarios que existían antes de los perfiles: administradores → Administrador; el resto → Gerencia.
   await pool.query(`UPDATE ${SCHEMA}.usuarios u SET perfil_id = (SELECT id FROM ${SCHEMA}.perfiles WHERE nombre = CASE WHEN u.es_admin THEN 'Administrador' ELSE 'Gerencia' END) WHERE perfil_id IS NULL`);
   const { ADMIN_DNI, ADMIN_PASSWORD, ADMIN_NOMBRE } = process.env;
@@ -555,6 +557,23 @@ app.get('/api/catalogo', wrap(auth), adminOnly, wrap(async (req, res) => {
     pool.query(`SELECT DISTINCT coordinador FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador <> '' ORDER BY coordinador`),
   ]);
   res.json({ cadenas: c.rows.map((r) => r.cadena), tiendas: t.rows.map((r) => r.cadena + '|' + r.tienda), coordinadores: k.rows.map((r) => r.coordinador) });
+}));
+
+// Correo de análisis: destinatarios guardados (el correo se envía desde el correo del administrador).
+const EMAIL_RE = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
+const emails = (v) => String(v ?? '').split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+app.get('/api/correo', wrap(auth), adminOnly, wrap(async (req, res) => {
+  const r = await pool.query(`SELECT valor FROM ${SCHEMA}.ajustes WHERE clave = 'correo'`);
+  res.json(r.rows[0]?.valor || { para: [], cc: [] });
+}));
+app.post('/api/correo', wrap(auth), adminOnly, wrap(async (req, res) => {
+  const para = emails(req.body?.para), cc = emails(req.body?.cc);
+  const malos = [...para, ...cc].filter((e) => !EMAIL_RE.test(e) || e.length > 120);
+  if (malos.length) return res.status(400).json({ error: `Revisa estos correos: ${malos.slice(0, 3).join(', ')}.` });
+  if (para.length + cc.length > 60) return res.status(400).json({ error: 'Máximo 60 destinatarios.' });
+  const valor = { para: [...new Set(para)], cc: [...new Set(cc)] };
+  await pool.query(`INSERT INTO ${SCHEMA}.ajustes (clave, valor) VALUES ('correo', $1) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, actualizado = now()`, [valor]);
+  res.json(valor);
 }));
 
 app.get('/api/perfiles', wrap(auth), adminOnly, wrap(async (req, res) => {
