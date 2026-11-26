@@ -1405,6 +1405,18 @@
             x.fillStyle = l.color; x.fillText(l.t, l.px, l.py);
           }
         }
+        if (opts.pctLabels) {
+          // Variación encima de cada par de barras.
+          const meta = c.getDatasetMeta(c.data.datasets.length - 1);
+          meta.data.forEach((bar, i) => {
+            const v = opts.pctLabels[i]; if (v == null) return;
+            const t = (v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%';
+            x.fillStyle = v >= 0 ? '#1E7D32' : '#C62828'; x.textAlign = 'center'; x.textBaseline = 'bottom';
+            const top = Math.min(...c.data.datasets.map((_, k) => c.getDatasetMeta(k).data[i]?.y ?? Infinity));
+            const cx = (c.getDatasetMeta(0).data[i].x + bar.x) / 2;
+            x.fillText(t, cx, top - 4);
+          });
+        }
         if (opts.valueLabels) {
           const ds = c.data.datasets[0], meta = c.getDatasetMeta(0);
           meta.data.forEach((bar, i) => {
@@ -1437,8 +1449,8 @@
       options: {
         indexAxis: opts.horizontal ? 'y' : 'x',
         responsive: false, animation: false, devicePixelRatio: 2,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        layout: { padding: { top: 8, right: 8, left: 2, bottom: 2 } },
+        plugins: { legend: { display: !!opts.legend, position: 'top', align: 'end', labels: { boxWidth: 12, boxHeight: 12, color: '#444', font: { size: 12, family: FONT_C } } }, tooltip: { enabled: false } },
+        layout: { padding: { top: opts.pctLabels ? 16 : 8, right: 8, left: 2, bottom: 2 } },
         scales: { x: xAxis, y: yAxis },
       },
       plugins: [bg, endLabels],
@@ -1635,17 +1647,77 @@
         <tr>${td('Total', false, true)}${td(nf(TA), true, true)}${td(nf(TB), true, true)}${td(pc(varPct(TB, TA)), true, true)}</tr></table>`;
     }
 
+    // ---------- toque de marketing: frase de arranque, cifras en negrita, lo que falta y dos gráficos simples
+    const G = '#1E7D32', Rr = '#C62828';
+    // Marcas dentro del texto: **negrita**, ⟦+texto⟧ verde, ⟦-texto⟧ rojo (se convierten después de escapar).
+    const fmtHtml = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/⟦\+(.+?)⟧/g, `<b style="color:${G}">$1</b>`).replace(/⟦-(.+?)⟧/g, `<b style="color:${Rr}">$1</b>`);
+    const plainTxt = (x) => x.replace(/\*\*(.+?)\*\*/g, '$1').replace(/⟦[+-](.+?)⟧/g, '$1');
+    const hook = p == null ? `${C.monthLabel} arrancó y ya llevamos **${soles(B)}**.`
+      : p >= 0.05 ? `¡Buenas noticias! ${C.monthLabel} viene fuerte: vamos ⟦+${pcAbs(p)} arriba⟧ del año pasado.`
+      : p >= 0 ? `${C.monthLabel} va por buen camino: estamos ⟦+${pcAbs(p)} arriba⟧ del año pasado.`
+      : p > -0.05 ? `${C.monthLabel} viene ⟦-${pcAbs(p)} abajo⟧ del año pasado, pero todavía estamos a tiempo de darle la vuelta.`
+      : `${C.monthLabel} viene complicado: estamos ⟦-${pcAbs(p)} abajo⟧ del año pasado y necesitamos acelerar en lo que queda del mes.`;
+    if (p != null) para[0] = `${C.d ? `Al ${C.d} de ${MES}` : `A la semana ${C.w}`} llevamos **${soles(B)}** vendidos${chain ? ` en ${nice(chain)}` : ''}, frente a ${soles(A)} del mismo corte de ${per0}: ${d >= 0 ? `**${soles(d)} más**` : `**${soles(d)} menos**`}.`;
+    else para[0] = para[0].replace(`Llevamos ${soles(B)}`, `Llevamos **${soles(B)}**`);
+    lines[0] = para[0];
+    // Lo que falta: días que quedan y cuánto se vendió el año pasado en el mes completo.
+    const fullMonthP = R.byYM.get(P * 100 + C.m) || 0;
+    const daysInMonth = new Date(Y, C.m, 0).getDate();
+    let falta = '';
+    if (C.d && C.d < daysInMonth && fullMonthP > B) {
+      falta = `Quedan ${daysInMonth - C.d} días del mes. Para superar ${per0} completo (${soles(fullMonthP)}) nos faltan **${soles(fullMonthP - B)}**, unos **${soles((fullMonthP - B) / (daysInMonth - C.d))} por día**. ¡Vamos por ello!`;
+    } else if (fullMonthP && B >= fullMonthP) {
+      falta = `Ya superamos todo lo que se vendió en ${per0} (${soles(fullMonthP)}). ¡Todo lo que venga ahora es récord!`;
+    }
+
+    // Gráficos (solo si el envío los admite; si no, se quitan al enviar).
+    const charts = [];
+    if (secs.has('graficos')) {
+      const C1 = '#2F5BEA', C0 = '#A3A9C2';
+      // 1) Venta acumulada del mes día a día, con el detalle diario.
+      try {
+        const daily = (await loadCmp()).filter((r) => r.m === C.m && (r.y === Y || r.y === P) && r.d > 0 && (!chain || r.cadena === chain));
+        if (daily.some((r) => r.y === Y)) {
+          const sum = (y) => { const a2 = new Array(daysInMonth).fill(0); for (const r of daily) if (r.y === y && r.d <= daysInMonth) a2[r.d - 1] += r.v; return a2; };
+          const dY = sum(Y), dP = sum(P);
+          let s1 = 0, s0 = 0;
+          const accY = dY.map((v2, i) => (i < (C.d || daysInMonth) ? (s1 += v2) : null)), accP = dP.map((v2) => (s0 += v2));
+          charts.push({ cid: 'mes', title: `Venta acumulada de ${MES}, día a día`,
+            src: await chartImage({ type: 'line', data: { labels: dY.map((_, i) => String(i + 1)), datasets: [
+              { label: String(P), data: accP, borderColor: C0, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, tension: .2 },
+              { label: String(Y), data: accY, borderColor: C1, backgroundColor: 'rgba(47,91,234,.10)', fill: 'origin', borderWidth: 3, pointRadius: accY.map((v2, i) => (i === (C.d || daysInMonth) - 1 ? 5 : 0)), pointBackgroundColor: C1, tension: .2 },
+            ] } }, { height: 230, legend: true }) });
+        }
+      } catch { /* sin detalle diario */ }
+      // 2) Venta del mes por cadena (o por tienda si se eligió una cadena).
+      const srcB = (chain ? [...stores] : [...chains]).sort((a, b) => b.b - a.b).slice(0, 7);
+      if (srcB.length) {
+        const lab = (s2) => { const n = nice(s2); return n.length > 14 ? n.slice(0, 13) + '…' : n; };
+        charts.push({ cid: 'cadenas', title: `${C.monthLabel} ${P} vs ${C.monthLabel} ${Y} por ${chain ? 'tienda' : 'cadena'} (${rango})`,
+          src: await chartImage({ type: 'bar', data: { labels: srcB.map((x) => lab(x.n)), datasets: [
+            { label: String(P), data: srcB.map((x) => x.a), backgroundColor: C0, borderRadius: 3, barPercentage: .85, categoryPercentage: .7 },
+            { label: String(Y), data: srcB.map((x) => x.b), backgroundColor: C1, borderRadius: 3, barPercentage: .85, categoryPercentage: .7 },
+          ] } }, { height: 240, legend: true, pctLabels: srcB.map((x) => (x.a ? varPct(x.b, x.a) : null)) }) });
+      }
+    }
+    mail.images = charts;
+    const chartHtml = (c) => `<div data-chart="1" style="margin:4px 0 16px"><div style="margin:0 0 6px"><b>${esc(c.title)}</b></div><img src="${c.src}" data-cid="${c.cid}" width="552" alt="${esc(c.title)}" style="display:block;width:100%;max-width:552px;height:auto;border:0"></div>`;
+
     const P_ = (h) => `<div style="margin:0 0 12px">${h}</div>`;
     const html = [
       P_('Hola equipo,'),
-      ...para.map((x) => P_(esc(x))),
+      P_(fmtHtml(hook)),
+      ...para.map((x) => P_(fmtHtml(x))),
+      charts[0] ? chartHtml(charts[0]) : '',
+      falta ? P_(fmtHtml(falta)) : '',
       tabla ? P_(`Este es el resumen por ${chain ? 'tienda' : 'cadena'} (montos en soles, ${rango} en ambos años):`) + tabla : '',
-      revisar.length ? `<div style="margin:0 0 4px">Puntos a revisar:</div><ul style="margin:0 0 12px;padding-left:22px">${revisar.map((r) => `<li style="margin:0 0 4px">${esc(r)}</li>`).join('')}</ul>` : '',
+      charts[1] ? chartHtml(charts[1]) : '',
+      revisar.length ? `<div style="margin:0 0 4px"><b>Puntos a revisar:</b></div><ul style="margin:0 0 12px;padding-left:22px">${revisar.map((r) => `<li style="margin:0 0 4px">${esc(r)}</li>`).join('')}</ul>` : '',
       $('#mlAttach').checked ? P_(`Adjunto el Excel con el detalle por cadena, tienda y coordinador.`) : '',
       P_(`Saludos,<br>${esc(session.user?.nombre || '')}`),
     ].filter(Boolean).join('\n');
     $('#mlBody').innerHTML = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;padding:24px 26px">${html}</div>`;
-    pts.length = 0; pts.push(...lines, ...revisar.map((r) => 'Revisar: ' + r));
+    pts.length = 0; pts.push(plainTxt(hook), ...lines.map(plainTxt), ...(falta ? [plainTxt(falta)] : []), ...revisar.map((r) => 'Revisar: ' + r));
 
     // Asunto por defecto (si el administrador no lo cambió a mano).
     const subj = `Avance ${C.monthLabel.toLowerCase()} ${Y} vs ${C.monthLabel.toLowerCase()} ${P}${C.d ? ` (al ${String(C.d).padStart(2, '0')}/${String(C.m).padStart(2, '0')})` : ''}${chain ? ` - ${chain.charAt(0) + chain.slice(1).toLowerCase()}` : ''}`;
@@ -1720,7 +1792,7 @@
     const box = $('#mlBody').cloneNode(true), imagenes = [];
     box.querySelectorAll('img[data-cid]').forEach((img) => {
       const m = /^data:image\/png;base64,(.+)$/.exec(img.getAttribute('src') || '');
-      if (!withImages || !m) { (img.closest('tr') || img).remove(); return; }
+      if (!withImages || !m) { (img.closest('[data-chart]') || img.closest('tr') || img).remove(); return; }
       if (!imagenes.some((x) => x.cid === img.dataset.cid)) imagenes.push({ cid: img.dataset.cid, base64: m[1] });
       img.setAttribute('src', 'cid:' + img.dataset.cid); img.removeAttribute('data-cid');
     });
