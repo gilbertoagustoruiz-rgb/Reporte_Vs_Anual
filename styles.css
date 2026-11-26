@@ -392,3 +392,40 @@ h1, h2, h3, h4, .k-value, .hero-line, .ins-value, .hk-value { font-family: "Sora
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .pair .chart-box.sym { flex: 1 0 380px; height: 380px; }
+
+/* ---------- Filtros en panel lateral oculto ---------- */
+.filter-handle {
+  position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 40;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 9px; border: 0; border-radius: 0 12px 12px 0;
+  background: var(--night); color: #fff; cursor: pointer;
+  box-shadow: 0 10px 24px -12px rgba(27, 31, 75, .6);
+  font: 600 13px "Plus Jakarta Sans", system-ui, sans-serif;
+}
+.filter-handle:hover { background: var(--night-2); }
+.fh-text { writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .02em; }
+.fh-count { min-width: 20px; height: 20px; border-radius: 999px; background: var(--dawn); color: #1B1F4B; font-size: 11.5px; font-weight: 800; display: grid; place-items: center; padding: 0 5px; }
+.drawer-scrim { position: fixed; inset: 0; background: rgba(15, 18, 48, .38); z-index: 44; }
+.drawer {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 45; width: min(340px, 92vw);
+  background: #fff; box-shadow: 18px 0 40px -20px rgba(27, 31, 75, .45);
+  padding: 20px 20px 24px; overflow-y: auto;
+  transform: translateX(-102%); transition: transform .22s ease;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head { display: flex; justify-content: space-between; align-items: center; }
+.drawer-head h2 { font-size: 18px; }
+.drawer-close { font-size: 16px; padding: 4px 8px; }
+.drawer .cut-banner { margin: 0; flex-direction: column; align-items: flex-start; box-shadow: none; }
+.drawer .cut-years { flex-basis: auto; }
+.drawer-filters { display: flex; flex-direction: column; gap: 12px; }
+.drawer-filters .f { min-width: 0; width: 100%; }
+.drawer-filters select { width: 100%; }
+.drawer-filters .actions-f { margin: 6px 0 0; }
+.drawer-filters .actions-f .btn { width: 100%; justify-content: center; }
+.drawer-reset { justify-content: center; }
+@media print { .filter-handle, .drawer, .drawer-scrim { display: none !important; } }
+.drawer .cut-banner { display: block; font-size: 14px; line-height: 1.5; }
+.drawer .cut-tag { display: inline-block; margin-bottom: 8px; }
+.drawer .cut-years { display: block; margin-top: 6px; }

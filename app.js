@@ -971,7 +971,30 @@
     renderCmp();
   }
 
+  // Cuántos filtros cambiaron respecto de lo normal (se muestra en la pestaña "Filtros").
+  function renderFilterCount(F) {
+    let n = 0;
+    if (F.tipo) n++;
+    if (F.chain) n++;
+    if (F.brand) n++;
+    if (state.hasCob && F.cob !== 'si') n++;
+    if (state.fromTouched && F.from !== (state.years.find((y) => y >= 2022) ?? state.years[0])) n++;
+    const el = $('#filterCount');
+    el.hidden = !n; el.textContent = n;
+    $('#btnFilters').setAttribute('aria-label', n ? `Filtros (${n} activos)` : 'Filtros');
+  }
+
+  function setDrawer(open) {
+    const d = $('#filterDrawer');
+    d.classList.toggle('open', open);
+    d.setAttribute('aria-hidden', String(!open));
+    $('#drawerScrim').hidden = !open;
+    $('#btnFilters').setAttribute('aria-expanded', String(open));
+    if (open) $('#fFrom').focus(); else if (d.contains(document.activeElement)) $('#btnFilters').focus();
+  }
+
   function renderBanner(F) {
+    renderFilterCount(F);
     const { C } = F;
     const parts = [`<b>Año ${C.y}</b>`, `<b>${C.monthLabel}</b>`];
     if (C.hasW) parts.push(`<b>Semana ${C.w}</b>`);
@@ -1674,6 +1697,14 @@
     ['#fFrom', '#fCob', '#fTipo', '#fChain', '#fBrand'].forEach((s) => $(s).addEventListener('change', renderAll));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyTable(b.dataset.copy)));
     $('#btnExport').addEventListener('click', exportExcel);
+    $('#btnFilters').addEventListener('click', () => setDrawer(!$('#filterDrawer').classList.contains('open')));
+    $('#btnFiltersClose').addEventListener('click', () => setDrawer(false));
+    $('#drawerScrim').addEventListener('click', () => setDrawer(false));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#filterDrawer').classList.contains('open')) setDrawer(false); });
+    $('#btnFiltersReset').addEventListener('click', () => {
+      $('#fTipo').value = ''; $('#fChain').value = ''; $('#fBrand').value = ''; $('#fCob').value = 'si';
+      state.fromTouched = false; syncFilterOptions(); renderAll();
+    });
     const toggle = (set, v) => (set.has(v) ? set.delete(v) : set.add(v));
     for (const [id, key] of [['#slMes', 'months'], ['#slSem', 'weeks'], ['#slDia', 'days']]) {
       $(id).addEventListener('click', (e) => {

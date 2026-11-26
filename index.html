@@ -96,8 +96,17 @@
     <div id="analysis" hidden>
       <div class="empty-state" data-empty>Todavía no hay datos en la base. Inicia sesión y sube los archivos en <b>Datos</b>.</div>
       <div data-content hidden>
-        <div class="cut-banner" id="cutBanner"></div>
-        <div class="filters card">
+        <button class="filter-handle" id="btnFilters" type="button" aria-expanded="false" aria-controls="filterDrawer">
+          <span class="fh-text">Filtros</span><span class="fh-count" id="filterCount" hidden></span>
+        </button>
+        <div class="drawer-scrim" id="drawerScrim" hidden></div>
+        <aside class="drawer" id="filterDrawer" aria-label="Filtros del reporte" aria-hidden="true">
+          <div class="drawer-head">
+            <h2>Filtros</h2>
+            <button class="icon-btn drawer-close" id="btnFiltersClose" type="button" aria-label="Cerrar filtros">✕</button>
+          </div>
+          <div class="cut-banner" id="cutBanner"></div>
+          <div class="filters drawer-filters">
           <div class="f"><label>Desde el año</label><select id="fFrom"></select></div>
           <div class="f" id="fCobWrap" hidden><label>Cobertura</label>
             <select id="fCob">
@@ -116,9 +125,10 @@
           </div>
           <div class="f"><label>Cadena</label><select id="fChain"></select></div>
           <div class="f" id="fBrandWrap"><label>Marca</label><select id="fBrand"></select></div>
-          
           <div class="f actions-f"><button class="btn btn-primary" id="btnExport">Descargar Excel</button></div>
-        </div>
+          </div>
+          <button class="btn drawer-reset" id="btnFiltersReset" type="button">Quitar filtros</button>
+        </aside>
       </div>
     </div>
 
