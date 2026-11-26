@@ -145,6 +145,17 @@ async function migrate() {
     await pool.query(`INSERT INTO ${SCHEMA}.perfiles (nombre, ver_todo, subir, eliminar, gestionar_coord, descargar, admin_usuarios, sistema)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (nombre) DO NOTHING`, [nombre, verTodo, subir, eliminar, coord, descargar, adminU, sistema]);
   }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.usuario_accesos (
+      dni   text NOT NULL REFERENCES ${SCHEMA}.usuarios(dni) ON DELETE CASCADE,
+      tipo  text NOT NULL CHECK (tipo IN ('coordinador', 'cadena', 'tienda')),
+      valor text NOT NULL,
+      PRIMARY KEY (dni, tipo, valor)
+    );
+    INSERT INTO ${SCHEMA}.usuario_accesos (dni, tipo, valor)
+      SELECT dni, 'coordinador', coordinador FROM ${SCHEMA}.usuarios WHERE coordinador <> '' ON CONFLICT DO NOTHING;
+    UPDATE ${SCHEMA}.usuarios SET coordinador = '' WHERE coordinador <> '';
+  `);
   // Usuarios que existían antes de los perfiles: administradores → Administrador; el resto → Gerencia.
   await pool.query(`UPDATE ${SCHEMA}.usuarios u SET perfil_id = (SELECT id FROM ${SCHEMA}.perfiles WHERE nombre = CASE WHEN u.es_admin THEN 'Administrador' ELSE 'Gerencia' END) WHERE perfil_id IS NULL`);
   const { ADMIN_DNI, ADMIN_PASSWORD, ADMIN_NOMBRE } = process.env;
@@ -182,7 +193,27 @@ const b64 = (s) => Buffer.from(s).toString('base64url');
 const PERMS = ['ver_todo', 'subir', 'eliminar', 'gestionar_coord', 'descargar', 'admin_usuarios'];
 const USER_SQL = `SELECT u.dni, u.nombre, u.hash, u.coordinador, p.id AS perfil_id, p.nombre AS perfil, ${PERMS.map((k) => `coalesce(p.${k}, false) AS ${k}`).join(', ')}
   FROM ${SCHEMA}.usuarios u LEFT JOIN ${SCHEMA}.perfiles p ON p.id = u.perfil_id WHERE u.dni = $1`;
-const publicUser = (u) => ({ dni: u.dni, nombre: u.nombre, coordinador: u.coordinador || '', perfil: u.perfil || 'Sin perfil', perfil_id: u.perfil_id, perms: Object.fromEntries(PERMS.map((k) => [k, !!u[k]])), admin: !!u.admin_usuarios });
+const publicUser = (u, accesos = []) => ({ dni: u.dni, nombre: u.nombre, perfil: u.perfil || 'Sin perfil', perfil_id: u.perfil_id, perms: Object.fromEntries(PERMS.map((k) => [k, !!u[k]])), admin: !!u.admin_usuarios, accesos });
+const ACC_TIPOS = ['coordinador', 'cadena', 'tienda'];
+async function accesosOf(dni) {
+  const r = await pool.query(`SELECT tipo, valor FROM ${SCHEMA}.usuario_accesos WHERE dni = $1 ORDER BY tipo, valor`, [dni]);
+  return r.rows;
+}
+// Normaliza la lista que llega del formulario: tipo válido y valor en mayúsculas ("CADENA|TIENDA" para tiendas).
+function cleanAccesos(list) {
+  const out = new Map();
+  for (const a of Array.isArray(list) ? list : []) {
+    const tipo = String(a?.tipo || ''); if (!ACC_TIPOS.includes(tipo)) continue;
+    let valor = tipo === 'tienda' ? String(a?.valor || '').split('|').map((x) => clean(x)).join('|') : clean(a?.valor, 200);
+    if (!valor || (tipo === 'tienda' && !/^[^|]+\|[^|]+$/.test(valor))) continue;
+    out.set(tipo + '\u0001' + valor, { tipo, valor });
+  }
+  return [...out.values()].slice(0, 200);
+}
+async function saveAccesos(client, dni, accesos) {
+  await client.query(`DELETE FROM ${SCHEMA}.usuario_accesos WHERE dni = $1`, [dni]);
+  if (accesos.length) await client.query(`INSERT INTO ${SCHEMA}.usuario_accesos (dni, tipo, valor) SELECT $1, * FROM unnest($2::text[], $3::text[])`, [dni, accesos.map((a) => a.tipo), accesos.map((a) => a.valor)]);
+}
 function signToken(user) {
   const payload = b64(JSON.stringify({ dni: user.dni, exp: Date.now() + 7 * 864e5 }));
   const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
@@ -204,13 +235,28 @@ async function auth(req, res, next) {
   // El perfil y los permisos se leen en cada pedido: un cambio de perfil rige de inmediato.
   const r = await pool.query(USER_SQL, [p.dni]);
   if (!r.rowCount) return res.status(401).json({ error: 'Tu usuario ya no existe.' });
-  req.user = publicUser(r.rows[0]);
+  req.user = publicUser(r.rows[0], await accesosOf(p.dni));
   next();
 }
 const can = (perm, msg) => (req, res, next) => (req.user?.perms[perm] ? next() : res.status(403).json({ error: msg || 'Tu perfil no tiene permiso para hacer esto.' }));
 const adminOnly = can('admin_usuarios', 'Solo un administrador puede gestionar usuarios y perfiles.');
 // Alcance de datos: perfiles sin "ver todo" solo ven las tiendas del coordinador asignado.
-const scopeOf = (u) => (u.perms.ver_todo ? null : (u.coordinador || '##SIN-COORDINADOR-ASIGNADO##'));
+function scopeOf(u) {
+  if (u.perms.ver_todo) return null;
+  const pick = (t) => u.accesos.filter((a) => a.tipo === t).map((a) => a.valor);
+  return { coords: pick('coordinador'), cadenas: pick('cadena'), tiendas: pick('tienda') };
+}
+// Condición SQL del alcance. "conCoord": la tabla tiene columna coordinador (ventas_tienda_dia);
+// si no la tiene (ventas), las tiendas del coordinador se buscan año por año en ventas_tienda_dia.
+function scopeSql(scope, params, conCoord, alias = '') {
+  const a = alias ? alias + '.' : '';
+  params.push(scope.coords, scope.cadenas, scope.tiendas);
+  const [pc, pk, pt] = [params.length - 2, params.length - 1, params.length];
+  const byCoord = conCoord
+    ? `${a}coordinador = ANY($${pc}::text[])`
+    : `(${a}anio, ${a}cadena, ${a}tienda) IN (SELECT DISTINCT anio, cadena, tienda FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador = ANY($${pc}::text[]))`;
+  return `(${byCoord} OR ${a}cadena = ANY($${pk}::text[]) OR (${a}cadena || '|' || ${a}tienda) = ANY($${pt}::text[]))`;
+}
 
 // Límite simple de intentos de inicio de sesión por IP.
 const attempts = new Map();
@@ -239,9 +285,9 @@ app.get('/api/data', wrap(auth), wrap(async (req, res) => {
   const [ventas, anios, cargas] = await Promise.all([
     scope == null
       ? pool.query(`SELECT cadena, tienda, marca, anio, mes, semana, venta::float8 AS v, unidades::float8 AS u, cobertura FROM ${SCHEMA}.ventas`)
-      : pool.query(`WITH s AS (SELECT DISTINCT anio, cadena, tienda FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador = $1)
-          SELECT v.cadena, v.tienda, v.marca, v.anio, v.mes, v.semana, v.venta::float8 AS v, v.unidades::float8 AS u, v.cobertura
-          FROM ${SCHEMA}.ventas v JOIN s USING (anio, cadena, tienda)`, [scope]),
+      : (() => { const ps = []; const cond = scopeSql(scope, ps, false, 'v');
+          return pool.query(`SELECT v.cadena, v.tienda, v.marca, v.anio, v.mes, v.semana, v.venta::float8 AS v, v.unidades::float8 AS u, v.cobertura
+          FROM ${SCHEMA}.ventas v WHERE ${cond}`, ps); })(),
     pool.query(`SELECT a.anio, a.max_mes, a.max_dia, a.actualizado, c.usuario, c.archivos,
                        (SELECT count(*) FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio)::int AS filas,
                        (SELECT coalesce(sum(venta), 0)::float8 FROM ${SCHEMA}.ventas v WHERE v.anio = a.anio) AS total,
@@ -258,7 +304,7 @@ app.get('/api/data', wrap(auth), wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   // Quien no ve todo no recibe totales ni el historial de cargas de la base completa.
   const aniosOut = scope == null ? anios.rows : anios.rows.map((a) => ({ anio: a.anio, max_mes: a.max_mes, max_dia: a.max_dia, actualizado: a.actualizado }));
-  res.json({ anios: aniosOut, cargas: scope == null ? cargas.rows : [], dict, rows, alcance: scope == null ? null : req.user.coordinador });
+  res.json({ anios: aniosOut, cargas: scope == null ? cargas.rows : [], dict, rows, alcance: scope == null ? null : req.user.accesos });
 }));
 
 // Detalle diario para la Comparativa y el Resumen (con el mismo alcance que /api/data).
@@ -266,8 +312,9 @@ app.get('/api/dias', wrap(auth), wrap(async (req, res) => {
   const scope = scopeOf(req.user);
   const r = scope == null
     ? await pool.query(`SELECT cadena, marca, cobertura, anio, mes, semana, dia, venta::float8 AS v, unidades::float8 AS u FROM ${SCHEMA}.ventas_dia`)
-    : await pool.query(`SELECT cadena, marca, cobertura, anio, mes, semana, dia, sum(venta)::float8 AS v, sum(unidades)::float8 AS u
-        FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador = $1 GROUP BY cadena, marca, cobertura, anio, mes, semana, dia`, [scope]);
+    : await (async () => { const ps = []; const cond = scopeSql(scope, ps, true);
+        return pool.query(`SELECT cadena, marca, cobertura, anio, mes, semana, dia, sum(venta)::float8 AS v, sum(unidades)::float8 AS u
+        FROM ${SCHEMA}.ventas_tienda_dia WHERE ${cond} GROUP BY cadena, marca, cobertura, anio, mes, semana, dia`, ps); })();
   const dict = { cadenas: [], marcas: [] };
   const idx = { cadenas: new Map(), marcas: new Map() };
   const id = (k, v) => { let i = idx[k].get(v); if (i == null) { i = dict[k].length; dict[k].push(v); idx[k].set(v, i); } return i; };
@@ -292,7 +339,7 @@ app.post('/api/comparativa', wrap(auth), wrap(async (req, res) => {
   if (Array.isArray(b.marcas)) add('marca = ANY($?::text[])', b.marcas.map((m) => clean(m, 120)));
   if (b.cadena) add('cadena = $?', clean(b.cadena));
   const scope = scopeOf(req.user);
-  if (scope != null) add('coordinador = $?', scope);
+  if (scope != null) where.push(scopeSql(scope, params, true));
   const dims = b.por === 'coordinador' ? ['coordinador'] : ['cadena', 'tienda'];
   const coordCol = b.por === 'coordinador' ? '' : `, (array_agg(coordinador ORDER BY mes DESC, dia DESC) FILTER (WHERE coordinador <> ''))[1] AS coordinador`;
   const r = await pool.query(
@@ -305,8 +352,10 @@ app.post('/api/comparativa', wrap(auth), wrap(async (req, res) => {
 
 app.get('/api/coordinadores', wrap(auth), wrap(async (req, res) => {
   const scope = scopeOf(req.user);
+  const ps = [];
+  const cond = scope == null ? 'true' : scopeSql(scope, ps, true);
   const r = await pool.query(`SELECT coordinador, count(DISTINCT tienda)::int AS tiendas, round(sum(venta))::float8 AS venta FROM ${SCHEMA}.ventas_tienda_dia
-    WHERE coordinador <> '' AND ($1::text IS NULL OR coordinador = $1) GROUP BY coordinador ORDER BY coordinador`, [scope]);
+    WHERE coordinador <> '' AND ${cond} GROUP BY coordinador ORDER BY coordinador`, ps);
   const rep = scope == null ? await pool.query(`SELECT original, nuevo FROM ${SCHEMA}.reemplazos WHERE tipo = 'coordinador' ORDER BY original`) : { rows: [] };
   res.json({ coordinadores: r.rows, reemplazos: rep.rows });
 }));
@@ -337,7 +386,7 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const r = await pool.query(USER_SQL, [dni]);
   if (!r.rowCount || !checkPassword(password, r.rows[0].hash)) return res.status(401).json({ error: 'DNI o contraseña incorrectos.' });
   const u = r.rows[0];
-  res.json({ token: signToken(u), user: publicUser(u) });
+  res.json({ token: signToken(u), user: publicUser(u, await accesosOf(u.dni)) });
 }));
 
 app.get('/api/me', wrap(auth), (req, res) => res.json({ user: req.user }));
@@ -441,20 +490,27 @@ const perfilExists = async (id) => (await pool.query(`SELECT 1 FROM ${SCHEMA}.pe
 const adminCount = async (exceptDni) => (await pool.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.usuarios u JOIN ${SCHEMA}.perfiles p ON p.id = u.perfil_id WHERE p.admin_usuarios AND u.dni <> $1`, [exceptDni || ''])).rows[0].n;
 
 app.get('/api/usuarios', wrap(auth), adminOnly, wrap(async (req, res) => {
-  const r = await pool.query(`SELECT u.dni, u.nombre, u.coordinador, u.creado_en, p.id AS perfil_id, p.nombre AS perfil, coalesce(p.ver_todo, false) AS ver_todo
+  const r = await pool.query(`SELECT u.dni, u.nombre, u.creado_en, p.id AS perfil_id, p.nombre AS perfil, coalesce(p.ver_todo, false) AS ver_todo,
+      coalesce((SELECT json_agg(json_build_object('tipo', a.tipo, 'valor', a.valor) ORDER BY a.tipo, a.valor) FROM ${SCHEMA}.usuario_accesos a WHERE a.dni = u.dni), '[]') AS accesos
     FROM ${SCHEMA}.usuarios u LEFT JOIN ${SCHEMA}.perfiles p ON p.id = u.perfil_id ORDER BY u.nombre`);
   res.json({ usuarios: r.rows });
 }));
 app.post('/api/usuarios', wrap(auth), adminOnly, wrap(async (req, res) => {
   const dni = String(req.body?.dni || '').trim(), nombre = String(req.body?.nombre || '').trim(), pw = String(req.body?.password || '');
-  const perfilId = +req.body?.perfil_id, coord = clean(req.body?.coordinador, 120);
+  const perfilId = +req.body?.perfil_id, accesos = cleanAccesos(req.body?.accesos);
   if (!/^\d{8,12}$/.test(dni)) return res.status(400).json({ error: 'El DNI debe tener entre 8 y 12 dígitos.' });
   if (!nombre) return res.status(400).json({ error: 'Escribe el nombre.' });
   if (pw.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
   if (!(await perfilExists(perfilId))) return res.status(400).json({ error: 'Elige un perfil.' });
-  const r = await pool.query(`INSERT INTO ${SCHEMA}.usuarios (dni, nombre, hash, es_admin, perfil_id, coordinador)
-    VALUES ($1, $2, $3, (SELECT admin_usuarios FROM ${SCHEMA}.perfiles WHERE id = $4), $4, $5) ON CONFLICT (dni) DO NOTHING`, [dni, nombre, hashPassword(pw), perfilId, coord]);
-  if (!r.rowCount) return res.status(409).json({ error: 'Ya existe un usuario con ese DNI.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(`INSERT INTO ${SCHEMA}.usuarios (dni, nombre, hash, es_admin, perfil_id)
+      VALUES ($1, $2, $3, (SELECT admin_usuarios FROM ${SCHEMA}.perfiles WHERE id = $4), $4) ON CONFLICT (dni) DO NOTHING`, [dni, nombre, hashPassword(pw), perfilId]);
+    if (!r.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Ya existe un usuario con ese DNI.' }); }
+    await saveAccesos(client, dni, accesos);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   res.json({ ok: true });
 }));
 // Editar un usuario: nombre, perfil, coordinador asignado y, si se escribe, una contraseña nueva.
@@ -462,20 +518,35 @@ app.post('/api/usuarios/:dni', wrap(auth), adminOnly, wrap(async (req, res) => {
   const dni = req.params.dni;
   const cur = await pool.query(`SELECT dni FROM ${SCHEMA}.usuarios WHERE dni = $1`, [dni]);
   if (!cur.rowCount) return res.status(404).json({ error: 'No existe ese usuario.' });
-  const nombre = String(req.body?.nombre || '').trim(), perfilId = +req.body?.perfil_id, coord = clean(req.body?.coordinador, 120), pw = String(req.body?.password || '');
+  const nombre = String(req.body?.nombre || '').trim(), perfilId = +req.body?.perfil_id, accesos = cleanAccesos(req.body?.accesos), pw = String(req.body?.password || '');
   if (!nombre) return res.status(400).json({ error: 'Escribe el nombre.' });
   if (!(await perfilExists(perfilId))) return res.status(400).json({ error: 'Elige un perfil.' });
   if (pw && pw.length < 8) return res.status(400).json({ error: 'La contraseña nueva debe tener al menos 8 caracteres.' });
   const newIsAdmin = (await pool.query(`SELECT admin_usuarios FROM ${SCHEMA}.perfiles WHERE id = $1`, [perfilId])).rows[0].admin_usuarios;
   if (!newIsAdmin && (await adminCount(dni)) === 0) return res.status(400).json({ error: 'Debe quedar al menos un usuario que pueda administrar usuarios y perfiles.' });
-  await pool.query(`UPDATE ${SCHEMA}.usuarios SET nombre = $2, perfil_id = $3, coordinador = $4, es_admin = $5${pw ? ', hash = $6' : ''} WHERE dni = $1`,
-    pw ? [dni, nombre, perfilId, coord, newIsAdmin, hashPassword(pw)] : [dni, nombre, perfilId, coord, newIsAdmin]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`UPDATE ${SCHEMA}.usuarios SET nombre = $2, perfil_id = $3, es_admin = $4${pw ? ', hash = $5' : ''} WHERE dni = $1`,
+      pw ? [dni, nombre, perfilId, newIsAdmin, hashPassword(pw)] : [dni, nombre, perfilId, newIsAdmin]);
+    await saveAccesos(client, dni, accesos);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   res.json({ ok: true });
 }));
 app.delete('/api/usuarios/:dni', wrap(auth), adminOnly, wrap(async (req, res) => {
   if (req.params.dni === req.user.dni) return res.status(400).json({ error: 'No puedes eliminar tu propio usuario.' });
   await pool.query(`DELETE FROM ${SCHEMA}.usuarios WHERE dni = $1`, [req.params.dni]);
   res.json({ ok: true });
+}));
+
+app.get('/api/catalogo', wrap(auth), adminOnly, wrap(async (req, res) => {
+  const [c, t, k] = await Promise.all([
+    pool.query(`SELECT DISTINCT cadena FROM ${SCHEMA}.ventas ORDER BY cadena`),
+    pool.query(`SELECT DISTINCT cadena, tienda FROM ${SCHEMA}.ventas ORDER BY cadena, tienda`),
+    pool.query(`SELECT DISTINCT coordinador FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador <> '' ORDER BY coordinador`),
+  ]);
+  res.json({ cadenas: c.rows.map((r) => r.cadena), tiendas: t.rows.map((r) => r.cadena + '|' + r.tienda), coordinadores: k.rows.map((r) => r.coordinador) });
 }));
 
 app.get('/api/perfiles', wrap(auth), adminOnly, wrap(async (req, res) => {

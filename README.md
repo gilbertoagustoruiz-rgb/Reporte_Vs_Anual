@@ -104,7 +104,12 @@ Para ver el reporte hay que **iniciar sesión** con DNI y contraseña. Los admin
 | **Gerencia** | Todas las tiendas | Ver y descargar PDF y Excel |
 
 - **Perfiles nuevos:** se crean marcando permisos (ver todas las tiendas, subir, eliminar, cambiar nombres de coordinadores, descargar, gestionar usuarios).
-- **Alcance de un usuario que no ve todo:** se le asigna un **coordinador** y solo ve las tiendas de ese coordinador, año por año. El filtro lo aplica el **servidor**, así que a ese usuario nunca le llegan los datos de otras tiendas, ni los totales generales.
+- **Accesos por usuario:** a un usuario cuyo perfil no ve todo se le arma una lista de accesos, y esos accesos **se suman**. Hay tres tipos:
+  - **Tiendas de un coordinador** (año por año).
+  - **Una cadena completa**, con todas sus tiendas.
+  - **Una tienda puntual** (cadena | tienda).
+
+  Por ejemplo: las tiendas de HERLES CORNELIO, más toda FALABELLA, más la tienda MIRAFLORES de RIPLEY. El filtro lo aplica el **servidor**, así que a ese usuario nunca le llegan los datos de otras tiendas ni los totales generales. Los accesos se guardan en la tabla `usuario_accesos`.
 - **Descargas:**
   - **PDF:** captura la pestaña tal como se ve, en hojas A4 horizontales, sin cortar los bloques, con encabezado de corte, usuario y fecha.
   - **Excel:** formato del reporte (encabezados índigo, filas alternas, formatos de soles y %, Var % en verde o rojo), con una hoja por tabla de la pestaña.

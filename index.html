@@ -406,7 +406,7 @@
       <header class="data-head">
         <div>
           <h2>Usuarios y perfiles</h2>
-          <p class="muted">Crea cuentas, asígnales un perfil y, si el perfil no ve todo, el coordinador cuyas tiendas pueden ver.</p>
+          <p class="muted">Crea cuentas y asígnales un perfil. Si el perfil no ve todo, define qué puede ver cada usuario: las tiendas de un coordinador, cadenas completas o tiendas puntuales (se suman).</p>
         </div>
       </header>
       <div class="admin-grid">
@@ -428,7 +428,21 @@
       <label>DNI<input name="dni" inputmode="numeric" pattern="\d{8,12}" required></label>
       <label>Nombre<input name="nombre" required></label>
       <label>Perfil<select name="perfil_id" required></select></label>
-      <label data-coord>Coordinador asignado<input name="coordinador" list="coordListAll" placeholder="Ej. HERLES CORNELIO"><small class="muted">Solo verá las tiendas de este coordinador.</small></label>
+      <div class="acc-editor" data-coord>
+        <div class="acc-title">Qué puede ver <small class="muted">Se suman todos los accesos de la lista.</small></div>
+        <ul class="acc-list" id="accList"></ul>
+        <div class="acc-add">
+          <select id="accTipo" aria-label="Tipo de acceso">
+            <option value="coordinador">Tiendas de un coordinador</option>
+            <option value="cadena">Una cadena completa</option>
+            <option value="tienda">Una tienda</option>
+          </select>
+          <input id="accValor" list="accOptions" placeholder="Escribe para buscar…" aria-label="Valor del acceso">
+          <button type="button" class="btn" id="accAdd">Agregar</button>
+        </div>
+        <datalist id="accOptions"></datalist>
+        <p class="form-error" id="accError"></p>
+      </div>
       <label>Contraseña <span data-pwhint>(mín. 8)</span><input name="password" type="password" minlength="8" autocomplete="new-password"></label>
       <datalist id="coordListAll"></datalist>
       <p class="form-error" data-error></p>

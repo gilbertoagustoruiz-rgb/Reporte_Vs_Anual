@@ -518,14 +518,19 @@
     if (u && ((state.view === 'datos' && !canDatos()) || (state.view === 'admin' && !perm('admin_usuarios')))) setView('resumen');
   }
 
-  function renderScope(D) {
+  const ACC_LABEL = { coordinador: 'Coordinador', cadena: 'Cadena', tienda: 'Tienda' };
+  const accText = (a) => (a.tipo === 'coordinador' ? `tiendas de ${a.valor}` : a.tipo === 'cadena' ? `toda la cadena ${a.valor}` : `tienda ${a.valor.split('|')[1]} (${a.valor.split('|')[0]})`);
+  const accesosText = (list) => { const t = list.map(accText); return t.length <= 1 ? t.join('') : t.slice(0, -1).join(', ') + ' y ' + t[t.length - 1]; };
+
+  function renderScope() {
     const bar = $('#scopeBar');
     const u = session.user;
     if (u && !perm('ver_todo')) {
       bar.hidden = false;
-      bar.innerHTML = D?.alcance && !D.alcance.startsWith('##')
-        ? `Estás viendo solo las tiendas de <b>${esc(D.alcance)}</b>.`
-        : 'Tu usuario todavía no tiene un coordinador asignado, así que no hay tiendas para mostrar. Pide a un administrador que te lo asigne.';
+      const acc = u.accesos || [];
+      bar.innerHTML = acc.length
+        ? `Estás viendo: <b>${esc(accesosText(acc))}</b>.`
+        : 'Tu usuario todavía no tiene accesos asignados, así que no hay tiendas para mostrar. Pide a un administrador que te los asigne.';
     } else bar.hidden = true;
   }
 
@@ -554,7 +559,7 @@
       const firstLoad = !state.loadedOnce; state.loadedOnce = true;
       api('/api/coordinadores').then((r) => { coordData = r; renderCoord(); fillCoordList(); }).catch(() => {});
       applyServerData(serverData);
-      renderScope(serverData);
+      renderScope();
       st.hidden = true;
       if (firstLoad && (state.records.length || !canDatos()) && state.view === 'datos') setView('resumen');
     } catch (e) {
@@ -1154,6 +1159,7 @@
 
   async function loadAdmin() {
     if (!perm('admin_usuarios')) return;
+    admin.catalog = null;
     try {
       const [u, p] = await Promise.all([api('/api/usuarios'), api('/api/perfiles')]);
       admin.users = u.usuarios; admin.perfiles = p.perfiles;
@@ -1165,7 +1171,7 @@
     const P = admin.perfiles;
     $('#tblAdminUsers').innerHTML = `<thead><tr><th>Nombre</th><th>DNI</th><th>Perfil</th><th>Ve</th><th></th></tr></thead><tbody>${
       admin.users.map((u) => `<tr><td><b>${esc(u.nombre)}</b></td><td>${esc(u.dni)}</td><td><span class="role-chip">${esc(u.perfil || 'Sin perfil')}</span></td>
-        <td>${u.ver_todo ? 'Todas las tiendas' : u.coordinador ? `Tiendas de ${esc(u.coordinador)}` : '<span class="down">Falta asignar coordinador</span>'}</td>
+        <td>${u.ver_todo ? 'Todas las tiendas' : u.accesos.length ? `<span class="acc-sum">${u.accesos.map((a) => `<span class="role-chip">${esc(accText(a))}</span>`).join('')}</span>` : '<span class="down">Sin accesos asignados</span>'}</td>
         <td class="num"><button class="btn" data-edit-user="${esc(u.dni)}">Editar</button> ${u.dni === session.user.dni ? '' : `<button class="btn btn-danger" data-del-user="${esc(u.dni)}">Eliminar</button>`}</td></tr>`).join('')}</tbody>`;
     $('#profileCards').innerHTML = P.map((p) => `<article class="pc">
       <div class="pc-head"><span class="pc-name">${esc(p.nombre)}</span><span class="pc-count">${p.usuarios} ${p.usuarios === 1 ? 'usuario' : 'usuarios'}</span></div>
@@ -1182,13 +1188,49 @@
     f.nombre.value = u?.nombre || '';
     f.perfil_id.innerHTML = admin.perfiles.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('');
     f.perfil_id.value = u?.perfil_id || (admin.perfiles.find((p) => p.nombre === 'Coordinador') || admin.perfiles[0]).id;
-    f.coordinador.value = u?.coordinador || '';
+    admin.acc = (u?.accesos || []).map((a) => ({ ...a }));
+    renderAccList();
+    loadCatalog();
     f.password.required = !u;
     $('[data-pwhint]', d).textContent = u ? '(déjala vacía para no cambiarla)' : '(mín. 8)';
     const sync = () => { const p = admin.perfiles.find((x) => x.id === +f.perfil_id.value); $('[data-coord]', d).hidden = !!p?.ver_todo; };
     f.perfil_id.onchange = sync; sync();
     d.dataset.mode = u ? 'edit' : 'new';
     d.showModal();
+  }
+
+  // ---- editor de accesos (coordinador, cadena completa o tienda puntual)
+  async function loadCatalog() {
+    if (!admin.catalog) { try { admin.catalog = await api('/api/catalogo'); } catch { admin.catalog = { cadenas: [], tiendas: [], coordinadores: [] }; } }
+    fillAccOptions();
+  }
+  function fillAccOptions() {
+    const c = admin.catalog; if (!c) return;
+    const t = $('#accTipo').value;
+    const opts = t === 'coordinador' ? c.coordinadores : t === 'cadena' ? c.cadenas : c.tiendas.map((x) => x.replace('|', ' | '));
+    $('#accOptions').innerHTML = opts.map((o) => `<option value="${esc(o)}">`).join('');
+    $('#accValor').placeholder = t === 'coordinador' ? 'Ej. HERLES CORNELIO' : t === 'cadena' ? 'Ej. TOTTUS' : 'Ej. TOTTUS | JOCKEY';
+  }
+  function renderAccList() {
+    $('#accList').innerHTML = admin.acc.length
+      ? admin.acc.map((a, i) => `<li><span class="k ${a.tipo}">${ACC_LABEL[a.tipo]}</span><b>${esc(a.tipo === 'tienda' ? a.valor.replace('|', ' · ') : a.valor)}</b><button type="button" data-acc-del="${i}" aria-label="Quitar acceso">✕</button></li>`).join('')
+      : '<li class="empty">Sin accesos: este usuario no verá ninguna tienda.</li>';
+  }
+  function addAcceso() {
+    const tipo = $('#accTipo').value, raw = $('#accValor').value.trim(), err = $('#accError');
+    err.textContent = '';
+    if (!raw) return;
+    let valor = raw.toUpperCase().replace(/\s+/g, ' ');
+    if (tipo === 'tienda') {
+      const parts = valor.split('|').map((x) => x.trim());
+      if (parts.length !== 2 || !parts[0] || !parts[1]) { err.textContent = 'Para una tienda escribe la cadena y la tienda, así: TOTTUS | JOCKEY. Elígela de la lista para no equivocarte.'; return; }
+      valor = parts.join('|');
+    }
+    const known = admin.catalog && (tipo === 'coordinador' ? admin.catalog.coordinadores : tipo === 'cadena' ? admin.catalog.cadenas : admin.catalog.tiendas);
+    if (known && known.length && !known.includes(valor)) err.textContent = `Ojo: "${raw}" todavía no aparece en los datos. Se guarda igual y aplicará cuando aparezca.`;
+    if (!admin.acc.some((a) => a.tipo === tipo && a.valor === valor)) admin.acc.push({ tipo, valor });
+    $('#accValor').value = '';
+    renderAccList();
   }
 
   function openProfileDialog(p) {
@@ -1201,6 +1243,10 @@
   }
 
   function initAdmin() {
+    $('#accTipo').addEventListener('change', () => { $('#accValor').value = ''; fillAccOptions(); });
+    $('#accAdd').addEventListener('click', addAcceso);
+    $('#accValor').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addAcceso(); } });
+    $('#accList').addEventListener('click', (e) => { const b = e.target.closest('[data-acc-del]'); if (b) { admin.acc.splice(+b.dataset.accDel, 1); renderAccList(); } });
     $('#btnNewUser').addEventListener('click', () => openUserDialog(null));
     $('#btnNewProfile').addEventListener('click', () => openProfileDialog(null));
     $('#tblAdminUsers').addEventListener('click', async (e) => {
@@ -1220,7 +1266,7 @@
     $('#formUserEdit').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = e.target, err = $('[data-error]', f), mode = $('#dlgUser').dataset.mode;
-      const body = { dni: f.dni.value.trim(), nombre: f.nombre.value, perfil_id: +f.perfil_id.value, coordinador: $('[data-coord]', f).hidden ? '' : f.coordinador.value, password: f.password.value };
+      const body = { dni: f.dni.value.trim(), nombre: f.nombre.value, perfil_id: +f.perfil_id.value, accesos: $('[data-coord]', f).hidden ? [] : admin.acc, password: f.password.value };
       try {
         await api(mode === 'edit' ? '/api/usuarios/' + encodeURIComponent(body.dni) : '/api/usuarios', { method: 'POST', body });
         $('#dlgUser').close(); toast(mode === 'edit' ? 'Usuario actualizado.' : 'Usuario creado.'); loadAdmin();
@@ -2018,7 +2064,7 @@
     const filt = [state.hasCob && F.cob !== 'all' ? COB_LABEL[F.cob] : null, F.tipo ? TIPO_LABEL[F.tipo] : null, F.chain ? `Cadena ${F.chain}` : null, F.brand ? `Marca ${F.brand}` : null].filter(Boolean);
     return [corte, `Años ${F.years.join(', ')}`, ...filt].join(' · ');
   }
-  const scopeText = () => (serverData?.alcance && !serverData.alcance.startsWith('##') ? ` · Tiendas de ${serverData.alcance}` : '');
+  const scopeText = () => (!perm('ver_todo') && session.user?.accesos?.length ? ` · Alcance: ${accesosText(session.user.accesos)}` : '');
 
   // Tablas del Resumen (se arman con los mismos cálculos que la pantalla).
   function resumenAOAs(F, R) {

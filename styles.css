@@ -647,3 +647,23 @@ body.locked main, body.locked .tabs, body.locked #dlGroup, body.locked .filter-h
 body.pdf-mode .period { position: static; backdrop-filter: none; background: #fff; }
 body.pdf-mode .subnav, body.pdf-mode [data-copy], body.pdf-mode .seg { display: none !important; }
 body.pdf-mode .table-wrap { max-height: none !important; overflow: visible !important; }
+
+/* ---------- Accesos por usuario ---------- */
+.dlg { width: min(520px, 94vw); }
+.acc-editor { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: #FAFBFE; }
+.acc-title { font-size: 12.5px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; }
+.acc-title small { font-weight: 500; margin-left: 6px; }
+.acc-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.acc-list li { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 4px 6px 4px 10px; font-size: 12.5px; }
+.acc-list li b { font-weight: 700; }
+.acc-list li .k { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; }
+.acc-list li .k.coordinador { background: #E8EEFF; color: #2A55E0; }
+.acc-list li .k.cadena { background: #FFF1E6; color: #B4530B; }
+.acc-list li .k.tienda { background: #E3F7F0; color: #0E8F6B; }
+.acc-list li button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 2px 4px; }
+.acc-list li button:hover { color: var(--bad); }
+.acc-list .empty { color: var(--bad); font-size: 12.5px; border: 0; background: none; padding: 0; }
+.acc-add { display: grid; grid-template-columns: 190px 1fr auto; gap: 8px; }
+.acc-add select, .acc-add input { font: inherit; font-size: 13.5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.acc-sum { display: flex; flex-wrap: wrap; gap: 4px; }
+@media (max-width: 560px) { .acc-add { grid-template-columns: 1fr; } }
