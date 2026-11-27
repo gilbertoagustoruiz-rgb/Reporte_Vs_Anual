@@ -1536,53 +1536,76 @@
   // ---- subida del archivo del APK
   async function apkUpload(file) {
     try {
+      if (!apk.data) apk.data = await api('/api/apk' + accQuery());
+      const per = apk.data?.periodo;
+      if (!per) return toast('Primero hay que subir la venta de la base en la pestaña Datos.', 7000);
+      const { anio: Y, mes: MM } = per, MESL = MESES_LARGO[MM - 1];
       toast('Leyendo el archivo del APK…');
       const wb = await readFile(file);
-      const agg = new Map();
-      let usadas = 0, sinFecha = 0, otras = 0, hojas = 0;
-      const faltan = new Set();
-      for (const name of wb.SheetNames) {
-        const rows = sheetRows(wb, name);
-        if (rows.length < 2) continue;
-        const h = detectHeaderRow(rows);
-        const headers = (rows[h] || []).map((x) => (x == null ? '' : String(x)));
-        const data = rows.slice(h + 1);
-        const map = detectMapping(headers, data);
-        const need = { venta: 'venta', fecha: 'fecha', cadena: 'cadena', tienda: 'tienda' };
-        const miss = Object.keys(need).filter((k) => map[k] == null);
-        if (miss.length) { miss.forEach((k) => faltan.add(k)); continue; }
-        hojas++;
-        for (const r of data) {
-          const v = parseAmount(r?.[map.venta]);
-          if (!v) continue;
-          const f = parseYM(r[map.fecha]);
-          if (!f || !f.d) { sinFecha++; continue; }
-          const marca = map.marca != null ? String(r[map.marca] ?? '').trim() : '';
-          if (marca && tipoDe(marca) !== 'paraiso') { otras++; continue; }
-          const fecha = `${f.y}-${String(f.m).padStart(2, '0')}-${String(f.d).padStart(2, '0')}`;
-          const coord = map.coordinador != null ? String(r[map.coordinador] ?? '').trim() : '';
-          const cad = String(r[map.cadena] ?? '').trim(), tie = String(r[map.tienda] ?? '').trim();
-          if (!cad || !tie) continue;
-          const u = map.unidades != null ? parseAmount(r[map.unidades]) || 0 : 0;
-          const k = [fecha, coord.toUpperCase(), cad.toUpperCase(), tie.toUpperCase(), marca.toUpperCase()].join('\u0001');
-          const o = agg.get(k) || agg.set(k, [fecha, coord, cad, tie, marca, 0, 0]).get(k);
-          o[5] += v; o[6] += u; usadas++;
+      // Solo la hoja con el nombre del mes que se evalúa (p. ej. "Noviembre", "NOV", "Noviembre 2026").
+      const isMonthSheet = (name) => norm(name).split(' ').some((w) => monthWord(w) === MM);
+      const sheet = wb.SheetNames.find(isMonthSheet);
+      if (!sheet) return toast(`El archivo no tiene una hoja llamada ${MESL}. Hojas encontradas: ${wb.SheetNames.join(', ')}.`, 10000);
+      const rows = sheetRows(wb, sheet);
+      if (rows.length < 2) return toast(`La hoja ${sheet} está vacía.`, 7000);
+      const h = detectHeaderRow(rows);
+      const headers = (rows[h] || []).map((x) => (x == null ? '' : String(x)));
+      const data = rows.slice(h + 1);
+      const map = detectMapping(headers, data);
+      // La fecha de la venta (para mes y semana) es siempre la columna "Fecha Real Venta".
+      const iReal = headers.findIndex((x) => norm(x) === 'fecha real venta');
+      if (iReal < 0) return toast(`La hoja ${sheet} no tiene la columna "Fecha Real Venta".`, 9000);
+      map.fecha = iReal;
+      const nom = { venta: 'venta', cadena: 'cadena', tienda: 'tienda' };
+      const miss = Object.keys(nom).filter((k) => map[k] == null || map[k] === iReal);
+      if (miss.length) return toast(`En la hoja ${sheet} no encontré las columnas de ${miss.map((k) => nom[k]).join(', ')}.`, 9000);
+      // Fechas escritas como texto: se decide si vienen día/mes o mes/día según cuál cae en el mes evaluado.
+      let dm = 0, md = 0;
+      for (const r of data.slice(0, 3000)) {
+        const v = r?.[iReal];
+        if (typeof v !== 'string') continue;
+        const m = v.trim().match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+        if (!m) continue;
+        if (+m[2] === MM) dm++;
+        if (+m[1] === MM) md++;
+      }
+      const monthFirst = md > dm;
+      const fechaDe = (v) => {
+        if (typeof v === 'string' && monthFirst) {
+          const m = v.trim().match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+          if (m) return okYM(fixYear(m[3]), +m[1], +m[2]);
         }
+        return parseYM(v);
+      };
+      const agg = new Map();
+      let usadas = 0, sinFecha = 0, otras = 0, fuera = 0;
+      for (const r of data) {
+        const v = parseAmount(r?.[map.venta]);
+        if (!v) continue;
+        const f = fechaDe(r[iReal]);
+        if (!f || !f.d) { sinFecha++; continue; }
+        if (f.y !== Y || f.m !== MM) { fuera++; continue; } // solo el mes que se evalúa
+        const marca = map.marca != null ? String(r[map.marca] ?? '').trim() : '';
+        if (marca && tipoDe(marca) !== 'paraiso') { otras++; continue; }
+        const cad = String(r[map.cadena] ?? '').trim(), tie = String(r[map.tienda] ?? '').trim();
+        if (!cad || !tie) continue;
+        const fecha = `${f.y}-${String(f.m).padStart(2, '0')}-${String(f.d).padStart(2, '0')}`;
+        const coord = map.coordinador != null ? String(r[map.coordinador] ?? '').trim() : '';
+        const u = map.unidades != null ? parseAmount(r[map.unidades]) || 0 : 0;
+        const k = [fecha, coord.toUpperCase(), cad.toUpperCase(), tie.toUpperCase(), marca.toUpperCase()].join('\u0001');
+        const o = agg.get(k) || agg.set(k, [fecha, coord, cad, tie, marca, 0, 0]).get(k);
+        o[5] += v; o[6] += u; usadas++;
       }
-      if (!hojas) {
-        const nom = { venta: 'venta', fecha: 'fecha', cadena: 'cadena', tienda: 'tienda' };
-        return toast(`No encontré en el archivo las columnas de ${[...faltan].map((k) => nom[k]).join(', ')}. El archivo del APK necesita fecha, cadena, tienda y venta (y de preferencia coordinador).`, 9000);
-      }
-      const rows = [...agg.values()];
-      if (!rows.length) return toast('El archivo no trae filas con venta y fecha.', 7000);
-      const fechas = rows.map((r) => r[0]).sort();
-      const total = rows.reduce((a, r) => a + r[5], 0);
-      const meses = [...new Set(rows.map((r) => r[0].slice(0, 7)))].map((x) => { const [y, m] = x.split('-'); return `${MESES_LARGO[+m - 1].toLowerCase()} ${y}`; });
-      const coords = new Set(rows.map((r) => r[1]).filter(Boolean)).size, tiendas = new Set(rows.map((r) => r[2] + '|' + r[3])).size;
-      const msg = `Archivo: ${file.name}\n\n${num(usadas)} filas con venta · del ${fechas[0].split('-').reverse().join('/')} al ${fechas[fechas.length - 1].split('-').reverse().join('/')}\nVenta APK: ${money(total)}\n${num(tiendas)} tiendas · ${num(coords)} coordinadores${otras ? `\n${num(otras)} filas de otras marcas (no Paraíso) se dejaron fuera.` : ''}${sinFecha ? `\n${num(sinFecha)} filas sin fecha válida se dejaron fuera.` : ''}\n\nSe reemplazará lo que haya del APK en: ${meses.join(', ')}.\n¿Guardar?`;
+      const out = [...agg.values()];
+      if (!out.length) return toast(`La hoja ${sheet} no trae ventas con "Fecha Real Venta" de ${MESL.toLowerCase()} ${Y}.`, 9000);
+      const fechas = out.map((r) => r[0]).sort();
+      const total = out.reduce((a, r) => a + r[5], 0);
+      const coords = new Set(out.map((r) => r[1]).filter(Boolean)).size, tiendas = new Set(out.map((r) => r[2] + '|' + r[3])).size;
+      const col = (i) => (i == null ? '—' : `"${headers[i]}"`);
+      const msg = `Archivo: ${file.name} · hoja "${sheet}"\n\nColumnas usadas: fecha ${col(iReal)}, venta ${col(map.venta)}, cadena ${col(map.cadena)}, tienda ${col(map.tienda)}, coordinador ${col(map.coordinador)}${map.marca != null ? `, marca ${col(map.marca)}` : ''}.\n\n${num(usadas)} filas con venta · del ${fechas[0].split('-').reverse().join('/')} al ${fechas[fechas.length - 1].split('-').reverse().join('/')}\nVenta APK Paraíso: ${money(total)}\n${num(tiendas)} tiendas · ${num(coords)} coordinadores${otras ? `\n${num(otras)} filas de otras marcas (no Paraíso) se dejaron fuera.` : ''}${fuera ? `\n${num(fuera)} filas con fecha fuera de ${MESL.toLowerCase()} ${Y} se dejaron fuera.` : ''}${sinFecha ? `\n${num(sinFecha)} filas sin fecha válida se dejaron fuera.` : ''}\n\nSolo se reemplaza lo del APK de ${MESL.toLowerCase()} ${Y} (la base de ventas no se toca).\n¿Guardar?`;
       if (!confirm(msg)) return;
       toast('Guardando el archivo del APK…');
-      const r = await api('/api/apk', { method: 'POST', body: { archivo: file.name, rows } });
+      const r = await api('/api/apk', { method: 'POST', body: { archivo: `${file.name} (${sheet})`, rows: out } });
       toast(`Listo: ${num(r.filas)} registros del APK guardados.`);
       await apkLoad(true);
     } catch (e) { toast(e.message, 8000); }

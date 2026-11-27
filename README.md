@@ -214,7 +214,7 @@ Opcionales: `SMTP_HOST` (por defecto `smtp.gmail.com`) y `SMTP_PORT` (por defect
 Pestaña **Híbridas vs APK**: cruza la Venta Paraíso real de la base con lo que registran las promotoras en el APK,
 siempre en el último mes del año en curso (del 1 al día que tienen ambos, la base y el APK).
 
-- **Archivo del APK** (Excel o CSV): fecha, coordinador, cadena, tienda y venta (marca y unidades opcionales). Las filas de
+- **Archivo del APK** (Excel o CSV): solo se lee la hoja con el nombre del mes evaluado (p. ej. "Noviembre"); la fecha para mes y semana es la columna **Fecha Real Venta**; además cadena, tienda, venta y coordinador (marca y unidades opcionales). Las filas de
   marcas que no son Paraíso se dejan fuera. Al guardar, reemplaza lo del APK en los meses que trae el archivo (tabla `apk_ventas`).
 - **Cruce**: por cadena y tienda; si el nombre no coincide exacto, por el nombre de la tienda (sin "Tda.", "Tienda", ni el nombre de la cadena).
   Las tiendas que no cruzan se listan aparte.
