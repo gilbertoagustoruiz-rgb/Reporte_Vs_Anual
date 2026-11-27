@@ -1494,6 +1494,9 @@
     return url;
   }
 
+  // Dirección pública del reporte (la misma desde donde se abre la app).
+  const APP_URL = location.origin + location.pathname.replace(/index\.html$/, '');
+
   async function genMail() {
     const C = cutInfo(), Y = C.y, P = Y - 1;
     const chain = $('#mlChain').value, secs = mailSecs();
@@ -1703,6 +1706,7 @@
       tabla ? P_(`Este es el resumen por ${chain ? 'tienda' : 'cadena'} (montos en soles, ${rango} en ambos años):`) + tabla : '',
       charts[1] ? chartHtml(charts[1]) : '',
       revisar.length ? `<div style="margin:0 0 4px"><b>Puntos a revisar:</b></div><ul style="margin:0 0 12px;padding-left:22px">${revisar.map((r) => `<li style="margin:0 0 4px">${esc(r)}</li>`).join('')}</ul>` : '',
+      P_(`Pueden revisar el detalle completo en el <a href="${esc(APP_URL)}" style="color:#1155CC;text-decoration:underline">Reporte Vs Anual</a> (${esc(APP_URL.replace(/^https?:\/\//, '').replace(/\/$/, ''))}).`),
       $('#mlAttach').checked ? P_(`Adjunto el Excel con el detalle por cadena, tienda y coordinador${CP ? ', con Venta Paraíso y Venta Competencia por separado' : ''}.`) : '',
       P_(`Saludos,<br>${esc(session.user?.nombre || '')}`),
     ].filter(Boolean).join('\n');
@@ -1713,7 +1717,7 @@
     if (!mail.subjEdited) $('#mlSubject').value = subj;
 
     // Excel adjunto: cada grupo en sus propias columnas, nunca sumados.
-    const lines = [hook, intro, ...resumen, ...para, ...(falta ? [falta] : []), ...revisar.map((r) => 'Revisar: ' + r)].map(plainTxt);
+    const lines = [hook, intro, ...resumen, ...para, ...(falta ? [falta] : []), ...revisar.map((r) => 'Revisar: ' + r), `Reporte Vs Anual: ${APP_URL}`].map(plainTxt);
     const sheets = [{ name: 'Análisis', title: `Análisis ${MES} ${Y} vs ${per0} (${rango})`, lines }];
     const headG = (first) => [...first, ...GROUPS.flatMap((g) => [`${g.short} ${P}`, `${g.short} ${Y}`, `${g.short} Var S/`, `${g.short} Var %`])];
     const typesG = (n) => [...Array(n).fill('t'), ...GROUPS.flatMap(() => ['$', '$', '$', '%'])];
