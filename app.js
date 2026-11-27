@@ -606,6 +606,11 @@
       if (cut.m !== lastInfo.max_mes) cut.d = null;
     }
     Object.assign(state, { records, years, cut, weekYears, hasBrand: records.some((r) => r.marca), hasCob: records.some((r) => r.cob != null) });
+    // Mes de corte por fecha (del día 1 al día de corte) para los años con detalle diario.
+    state.mtd = D.mtd ? {
+      m: D.mtd.mes, d: D.mtd.dia, years: new Set(D.mtd.anios),
+      recs: D.mtd.rows.map(([ci, ti, mi, y, cob, v, u]) => ({ cadena: dict.cadenas[ci], tienda: dict.tiendas[ti], marca: dict.marcas[mi], tipo: tipoDe(dict.marcas[mi]), y, cob: cob ?? null, v, u })),
+    } : null;
     syncFilterOptions();
     renderFiles();
     renderBase();
@@ -887,9 +892,11 @@
   function cutInfo() {
     const c = state.cut;
     const hasW = !!c.w;
+    const M = state.mtd;
+    const byDate = (y) => !!(M && c.d && M.m === c.m && M.d === c.d && M.years.has(y));
     return {
       ...c, hasW,
-      ytdLabel: (y) => (hasW && state.weekYears.has(y) ? `Sem 1–${c.w}` : `Ene–${MESES[c.m - 1]}`),
+      ytdLabel: (y) => (byDate(y) ? `1 Ene–${c.d} ${MESES[c.m - 1]}` : hasW && state.weekYears.has(y) ? `Sem 1–${c.w}` : `Ene–${MESES[c.m - 1]}`),
       monthLabel: MESES_LARGO[c.m - 1],
       dateText: c.d ? `${String(c.d).padStart(2, '0')}/${String(c.m).padStart(2, '0')}/${c.y}` : `${MESES_LARGO[c.m - 1]} ${c.y}`,
     };
@@ -902,10 +909,19 @@
     const chain = $('#fChain').value, brand = $('#fBrand').value, tipo = state.hasBrand ? $('#fTipo').value : '';
     const cob = state.hasCob ? $('#fCob').value : 'all';
     const cobOk = (r) => cob === 'all' || (cob === 'si' ? r.cob === 1 : cob === 'no' ? r.cob === 0 : r.cob == null);
-    const recs = state.records.filter((r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo) && cobOk(r));
+    const keep = (r) => r.y >= from && r.y <= C.y && (!chain || r.cadena === chain) && (!brand || r.marca === brand) && (!tipo || r.tipo === tipo) && cobOk(r);
+    const recs = state.records.filter(keep);
+    const mtd = mtdFor(keep);
     // La participación Paraíso solo tiene sentido viendo todas las marcas.
     const showShare = state.hasBrand && !tipo && !brand;
-    return { C, from, years, chain, brand, tipo, cob, showShare, recs };
+    return { C, from, years, chain, brand, tipo, cob, showShare, recs, mtd };
+  }
+
+  // Registros del mes de corte por fecha, filtrados igual que los semanales (null si no hay detalle diario del corte).
+  function mtdFor(keep) {
+    const M = state.mtd, C = state.cut;
+    if (!M || !C || !C.d || M.m !== C.m || M.d !== C.d) return null;
+    return { years: M.years, recs: M.recs.filter(keep) };
   }
 
   const blank = () => ({ full: 0, ytd: 0, month: 0, week: 0 });
@@ -917,11 +933,14 @@
     const byYM = new Map(), byYW = new Map();
     const byChain = new Map(), byStore = new Map();
     let maxW = 0;
+    // Años con detalle diario: el mes de corte y el acumulado se cortan por FECHA (1 al día de corte), con F.mtd.
+    const byDay = (y) => !!F.mtd && F.mtd.years.has(y);
     for (const r of F.recs) {
       const Y = byYear.get(r.y);
       if (!Y) continue;
-      // Mes de corte parejo: en los demás años, el mes solo cuenta hasta la semana de corte (no el mes completo).
-      const ytd = inYtd(r), mo = r.m === C.m && (r.y === C.y || !(C.hasW && state.weekYears.has(r.y) && r.w > 0) || r.w <= C.w), wk = C.hasW && r.w === C.w;
+      // Mes de corte parejo: sin detalle diario, en los demás años el mes solo cuenta hasta la semana de corte.
+      const dayY = byDay(r.y);
+      const ytd = dayY ? r.m < C.m : inYtd(r), mo = !dayY && r.m === C.m && (r.y === C.y || !(C.hasW && state.weekYears.has(r.y) && r.w > 0) || r.w <= C.w), wk = C.hasW && r.w === C.w;
       const sk = r.cadena + '\u0001' + r.tienda;
       Y.full += r.v; if (r.v) Y.storesFull.add(sk);
       if (ytd) { Y.ytd += r.v; Y.u += r.u; if (r.v) Y.stores.add(sk); }
@@ -942,6 +961,21 @@
           const op = o.yp[r.y] || (o.yp[r.y] = blank());
           op.full += r.v; if (ytd) op.ytd += r.v; if (mo) op.month += r.v; if (wk) op.week += r.v;
         }
+      }
+    }
+    // Mes de corte por fecha: suma al mes y al acumulado de cada año con detalle diario.
+    for (const r of F.mtd?.recs || []) {
+      const Y = byYear.get(r.y);
+      if (!Y || !byDay(r.y)) continue;
+      const sk = r.cadena + '\u0001' + r.tienda;
+      Y.month += r.v; Y.ytd += r.v; Y.u += r.u || 0; if (r.v) Y.stores.add(sk);
+      if (r.tipo !== 'sinmarca') { const G = r.tipo === 'paraiso' ? Y.p : Y.c; G.month += r.v; G.ytd += r.v; }
+      for (const [map, key, base] of [[byChain, r.cadena, { cadena: r.cadena }], [byStore, sk, { cadena: r.cadena, tienda: r.tienda }]]) {
+        let o = map.get(key);
+        if (!o) map.set(key, (o = { ...base, y: {}, yp: {} }));
+        const oy = o.y[r.y] || (o.y[r.y] = blank());
+        oy.month += r.v; oy.ytd += r.v;
+        if (r.tipo === 'paraiso') { const op = o.yp[r.y] || (o.yp[r.y] = blank()); op.month += r.v; op.ytd += r.v; }
       }
     }
     return { byYear, byYM, byYW, byChain, byStore, maxW };
@@ -1477,7 +1511,8 @@
     const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
     for (const g of GROUPS) {
       const recs = g.k ? recsAll.filter((r) => r.tipo === g.k) : recsAll;
-      const R = compute({ C, from: years[0], years, chain, brand: '', tipo: g.k || '', cob: 'all', showShare: false, recs });
+      const keepG = (r) => r.y <= C.y && (!chain || r.cadena === chain) && (!g.k || r.tipo === g.k);
+      const R = compute({ C, from: years[0], years, chain, brand: '', tipo: g.k || '', cob: 'all', showShare: false, recs, mtd: mtdFor(keepG) });
       g.R = R;
       const cur = R.byYear.get(Y), prev = R.byYear.get(P);
       g.B = cur?.month || 0; g.A = prev?.month || 0; g.d = g.B - g.A; g.p = g.A ? varPct(g.B, g.A) : null;
@@ -1489,7 +1524,7 @@
       g.coord = [];
       try {
         const body = { anios: [P, Y], por: 'coordinador', cadena: chain || undefined, meses: [C.m] };
-        if (wkBoth) body.semanas = upTo(C.w);
+        if (C.d) body.dias = upTo(C.d); else if (wkBoth) body.semanas = upTo(C.w);
         if (g.k) body.marcas = marcasDe(g.k);
         const r = await api('/api/comparativa', { method: 'POST', body });
         const m = new Map();

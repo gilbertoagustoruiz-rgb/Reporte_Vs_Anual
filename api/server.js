@@ -307,15 +307,31 @@ app.get('/api/data', wrap(auth), wrap(async (req, res) => {
                 FROM ${SCHEMA}.anios a LEFT JOIN ${SCHEMA}.cargas c ON c.id = a.carga_id ORDER BY a.anio`),
     pool.query(`SELECT id, usuario, archivos, anios, filas, total::float8 AS total, creado_en FROM ${SCHEMA}.cargas ORDER BY id DESC LIMIT 20`),
   ]);
+  // Mes de corte por FECHA (no por semana): del día 1 al día de corte en cada año que tiene detalle diario.
+  // Así noviembre 2025 se compara del 1 al 22, igual que noviembre 2026, aunque su semana 47 termine el 23.
+  const corte = await pool.query(`SELECT anio, mes, dia FROM ${SCHEMA}.ventas_tienda_dia ORDER BY anio DESC, mes DESC, dia DESC LIMIT 1`);
+  let mtd = null;
+  if (corte.rows.length) {
+    const { mes, dia } = corte.rows[0];
+    const ps = [mes, dia];
+    const cond = scope == null ? 'true' : scopeSql(scope, ps, true);
+    const [m, ys] = await Promise.all([
+      pool.query(`SELECT cadena, tienda, marca, anio, cobertura, sum(venta)::float8 AS v, sum(unidades)::float8 AS u
+        FROM ${SCHEMA}.ventas_tienda_dia WHERE mes = $1 AND dia <= $2 AND ${cond} GROUP BY cadena, tienda, marca, anio, cobertura`, ps),
+      pool.query(`SELECT DISTINCT anio FROM ${SCHEMA}.ventas_tienda_dia`),
+    ]);
+    mtd = { mes, dia, anios: ys.rows.map((x) => x.anio), rows: m.rows };
+  }
   // Formato compacto: diccionarios de textos + filas con índices.
   const dict = { cadenas: [], tiendas: [], marcas: [] };
   const idx = { cadenas: new Map(), tiendas: new Map(), marcas: new Map() };
   const id = (k, v) => { let i = idx[k].get(v); if (i == null) { i = dict[k].length; dict[k].push(v); idx[k].set(v, i); } return i; };
   const rows = ventas.rows.map((r) => [id('cadenas', r.cadena), id('tiendas', r.tienda), id('marcas', r.marca), r.anio, r.mes, r.semana, r.v, r.u, r.cobertura]);
+  if (mtd) mtd.rows = mtd.rows.map((r) => [id('cadenas', r.cadena), id('tiendas', r.tienda), id('marcas', r.marca), r.anio, r.cobertura, r.v, r.u]);
   res.set('Cache-Control', 'no-store');
   // Quien no ve todo no recibe totales ni el historial de cargas de la base completa.
   const aniosOut = scope == null ? anios.rows : anios.rows.map((a) => ({ anio: a.anio, max_mes: a.max_mes, max_dia: a.max_dia, actualizado: a.actualizado }));
-  res.json({ anios: aniosOut, cargas: scope == null ? cargas.rows : [], dict, rows, alcance: scope == null ? null : req.user.accesos });
+  res.json({ anios: aniosOut, cargas: scope == null ? cargas.rows : [], dict, rows, mtd, alcance: scope == null ? null : req.user.accesos });
 }));
 
 // Detalle diario para la Comparativa y el Resumen (con el mismo alcance que /api/data).
