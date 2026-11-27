@@ -710,3 +710,26 @@ body.pdf-mode .table-wrap { max-height: none !important; overflow: visible !impo
 .scope-chip:hover { border-color: #B4530B; }
 .scope-chip.on { background: #B4530B; border-color: #B4530B; color: #fff; }
 .mail-meta .mail-state.sent { color: #0E8F6B; font-weight: 600; }
+
+/* Ventas híbridas vs APK */
+.apk-status { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: var(--text-2); }
+.apk-status.warn { background: #FFF4E5; border-color: #F2C391; color: #8A4B0B; }
+.apk-status.ok { background: #E9F8F2; border-color: #A6E3CB; color: #0B6B4F; }
+.apk-empty { text-align: center; padding: 34px 20px; }
+.apk-empty h3 { margin: 0 0 6px; font: 700 18px "Sora", sans-serif; color: var(--night); }
+.apk-empty p { margin: 0 auto; max-width: 560px; color: var(--text-2); line-height: 1.55; }
+.apk-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.apk-panel-head h3 { margin: 0; font: 700 16px "Sora", sans-serif; color: var(--night); }
+.apk-panel-head p { margin: 0; }
+.apk-week-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; align-items: center; }
+.apk-chart { position: relative; height: 240px; }
+.apk-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.apk-tools select, .apk-tools input { font: 500 13px "Plus Jakarta Sans", sans-serif; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.apk-tools input { flex: 1; min-width: 180px; max-width: 320px; }
+.apk-week-pick { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.apk-table { max-height: 560px; overflow: auto; }
+.tbl .cap { font-weight: 700; }
+.tbl .cap.hi { color: #0B6B4F; } .tbl .cap.mid { color: #8A4B0B; } .tbl .cap.lo { color: #C0283A; }
+.tbl th.grp { text-align: center; border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) { .apk-week-grid { grid-template-columns: 1fr; } }
+.tbl tfoot .cap { color: #fff !important; }

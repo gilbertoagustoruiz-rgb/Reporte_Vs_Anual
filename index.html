@@ -22,6 +22,7 @@
       <button class="tab" data-view="resumen" role="tab">Resumen</button>
       <button class="tab" data-view="comparativa" role="tab">Comparativa</button>
       <button class="tab" data-view="anual" role="tab">Por año</button>
+      <button class="tab" data-view="apk" role="tab">Híbridas vs APK</button>
       <button class="tab active" data-view="datos" role="tab" data-perm="datos">Datos</button>
       <button class="tab" data-view="admin" role="tab" data-perm="admin_usuarios" hidden>Administración</button>
     </nav>
@@ -402,6 +403,59 @@
     </section>
 
     <!-- ============ ADMINISTRACIÓN ============ -->
+    <section id="view-apk" class="view">
+      <header class="data-head">
+        <div>
+          <h2>Ventas híbridas vs APK</h2>
+          <p class="muted" id="apkSub">Venta Paraíso real de la base frente a lo registrado por las promotoras en el APK, en el último mes del año en curso.</p>
+        </div>
+        <div class="actions">
+          <button class="btn" id="apkExport" type="button" disabled>Descargar Excel</button>
+          <button class="btn btn-primary" id="apkUploadBtn" type="button" hidden>Subir archivo del APK</button>
+          <input type="file" id="apkFile" accept=".xlsx,.xls,.xlsb,.xlsm,.csv,.txt" hidden>
+        </div>
+      </header>
+      <div class="apk-status" id="apkStatus" hidden></div>
+      <div id="apkEmpty" class="panel apk-empty" hidden></div>
+      <div id="apkBody" hidden>
+        <div class="kpis" id="apkKpis"></div>
+        <div class="panel">
+          <div class="apk-panel-head">
+            <h3>Semana a semana</h3>
+            <p class="muted small" id="apkWeekNote"></p>
+          </div>
+          <div class="apk-week-grid">
+            <div class="table-wrap"><table id="tblApkWeeks" class="tbl cmp"></table></div>
+            <div class="apk-chart"><canvas id="chApkWeeks" aria-label="Venta real y APK por semana" role="img"></canvas></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="apk-panel-head">
+            <h3>Captura por coordinador, cadena y tienda</h3>
+            <div class="seg" id="apkBy" role="tablist" aria-label="Ver por">
+              <button type="button" class="on" data-by="coordinador">Coordinador</button>
+              <button type="button" data-by="cadena">Cadena</button>
+              <button type="button" data-by="tienda">Tienda</button>
+            </div>
+          </div>
+          <div class="apk-tools">
+            <label class="apk-week-pick">Semana <select id="apkWeek"></select></label>
+            <input type="search" id="apkSearch" placeholder="Buscar…" aria-label="Buscar en la tabla">
+          </div>
+          <div class="table-wrap apk-table"><table id="tblApk" class="tbl cmp"></table></div>
+        </div>
+        <details class="history" id="apkUnmatchedBox">
+          <summary id="apkUnmatchedSum">Tiendas del APK que no cruzan con la base</summary>
+          <p class="muted small">Estas tiendas vienen en el archivo del APK pero no se encontraron con el mismo nombre (cadena y tienda) en la base del mes. Su venta APK no entra en la captura. Revisa cómo está escrito el nombre.</p>
+          <div class="table-wrap"><table id="tblApkUnmatched" class="tbl"></table></div>
+        </details>
+        <details class="history">
+          <summary id="apkNoApkSum">Tiendas con venta Paraíso real y sin registro en el APK</summary>
+          <div class="table-wrap"><table id="tblApkNoApk" class="tbl"></table></div>
+        </details>
+      </div>
+    </section>
+
     <section id="view-admin" class="view">
       <header class="data-head">
         <div>

@@ -208,3 +208,15 @@ Para crear la contraseña de aplicación: la cuenta debe tener la verificación 
 https://myaccount.google.com/apppasswords se crea una con el nombre "Reporte Vs Anual". Si esa página dice que no está
 disponible, el administrador de Google Workspace de la empresa debe permitir las contraseñas de aplicación.
 Opcionales: `SMTP_HOST` (por defecto `smtp.gmail.com`) y `SMTP_PORT` (por defecto `465`).
+
+## Ventas híbridas vs APK
+
+Pestaña **Híbridas vs APK**: cruza la Venta Paraíso real de la base con lo que registran las promotoras en el APK,
+siempre en el último mes del año en curso (del 1 al día que tienen ambos, la base y el APK).
+
+- **Archivo del APK** (Excel o CSV): fecha, coordinador, cadena, tienda y venta (marca y unidades opcionales). Las filas de
+  marcas que no son Paraíso se dejan fuera. Al guardar, reemplaza lo del APK en los meses que trae el archivo (tabla `apk_ventas`).
+- **Cruce**: por cadena y tienda; si el nombre no coincide exacto, por el nombre de la tienda (sin "Tda.", "Tienda", ni el nombre de la cadena).
+  Las tiendas que no cruzan se listan aparte.
+- **Medidas**: venta real, APK, captura (APK ÷ real) y venta sin registrar, por semana y por coordinador, cadena y tienda (mes y semana elegida).
+- Los coordinadores solo ven lo suyo; descarga en Excel con el formato del reporte.

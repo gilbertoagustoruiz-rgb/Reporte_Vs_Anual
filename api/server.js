@@ -157,6 +157,14 @@ async function migrate() {
       SELECT dni, 'coordinador', coordinador FROM ${SCHEMA}.usuarios WHERE coordinador <> '' ON CONFLICT DO NOTHING;
     UPDATE ${SCHEMA}.usuarios SET coordinador = '' WHERE coordinador <> '';
   `);
+  // Ventas registradas en el APK por las promotoras (se cruzan contra la venta real de la base).
+  await pool.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA}.apk_ventas (
+    fecha date NOT NULL, anio int NOT NULL, mes smallint NOT NULL, semana smallint NOT NULL, dia smallint NOT NULL,
+    coordinador text NOT NULL DEFAULT '', cadena text NOT NULL, tienda text NOT NULL, marca text NOT NULL DEFAULT '',
+    venta numeric(16,2) NOT NULL DEFAULT 0, unidades numeric(14,2) NOT NULL DEFAULT 0)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS apk_ventas_am ON ${SCHEMA}.apk_ventas (anio, mes)`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA}.apk_cargas (id serial PRIMARY KEY, usuario text, archivo text, desde date, hasta date,
+    filas int, total numeric(18,2), creado_en timestamptz NOT NULL DEFAULT now())`);
   // Ajustes simples (clave → valor), por ejemplo los destinatarios del correo de análisis.
   await pool.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA}.ajustes (clave text PRIMARY KEY, valor jsonb NOT NULL, actualizado timestamptz NOT NULL DEFAULT now())`);
   // Usuarios que existían antes de los perfiles: administradores → Administrador; el resto → Gerencia.
@@ -574,6 +582,78 @@ app.get('/api/catalogo', wrap(auth), adminOnly, wrap(async (req, res) => {
     pool.query(`SELECT DISTINCT coordinador FROM ${SCHEMA}.ventas_tienda_dia WHERE coordinador <> '' ORDER BY coordinador`),
   ]);
   res.json({ cadenas: c.rows.map((r) => r.cadena), tiendas: t.rows.map((r) => r.cadena + '|' + r.tienda), coordinadores: k.rows.map((r) => r.coordinador) });
+}));
+
+// ---------------------------------------------------------------- Ventas híbridas vs APK
+// Subida del archivo del APK: reemplaza los meses que trae el archivo.
+app.post('/api/apk', wrap(auth), can('subir'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'El archivo no trae filas con venta.' });
+  if (rows.length > 400000) return res.status(400).json({ error: 'El archivo es demasiado grande (máximo 400 mil filas agrupadas).' });
+  const cmap = await coordMap();
+  const out = [];
+  for (const r of rows) {
+    const [f, coord, cad, tie, mar, v, u] = Array.isArray(r) ? r : [];
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(f || ''));
+    if (!m) continue;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCMonth() !== mo - 1 || y < 2015 || y > 2100) continue;
+    const doy = Math.round((dt - Date.UTC(y, 0, 1)) / 864e5) + 1, wd = (new Date(Date.UTC(y, 0, 1)).getUTCDay() + 6) % 7;
+    const w = Math.floor((doy - 1 + wd) / 7) + 1;
+    const cadena = clean(cad), tienda = clean(tie);
+    if (!cadena || !tienda || !Number.isFinite(+v)) continue;
+    const c = clean(coord, 120);
+    out.push([f, y, mo, w, d, cmap.get(c) || c, cadena, tienda, clean(mar, 120), Math.round(+v * 100) / 100, Math.round((+u || 0) * 100) / 100]);
+  }
+  if (!out.length) return res.status(400).json({ error: 'Ninguna fila tiene fecha, cadena, tienda y venta válidas.' });
+  const meses = [...new Set(out.map((r) => r[1] * 100 + r[2]))];
+  const col = (i) => out.map((r) => r[i]);
+  const fechas = col(0).sort();
+  const total = out.reduce((a, r) => a + r[9], 0);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM ${SCHEMA}.apk_ventas WHERE (anio * 100 + mes) = ANY($1::int[])`, [meses]);
+    for (let i = 0; i < out.length; i += 20000) {
+      const part = out.slice(i, i + 20000), pc = (k) => part.map((r) => r[k]);
+      await client.query(`INSERT INTO ${SCHEMA}.apk_ventas (fecha, anio, mes, semana, dia, coordinador, cadena, tienda, marca, venta, unidades)
+        SELECT * FROM unnest($1::date[], $2::int[], $3::smallint[], $4::smallint[], $5::smallint[], $6::text[], $7::text[], $8::text[], $9::text[], $10::numeric[], $11::numeric[])`,
+        [pc(0), pc(1), pc(2), pc(3), pc(4), pc(5), pc(6), pc(7), pc(8), pc(9), pc(10)]);
+    }
+    await client.query(`INSERT INTO ${SCHEMA}.apk_cargas (usuario, archivo, desde, hasta, filas, total) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user.nombre, String(b.archivo || '').slice(0, 200), fechas[0], fechas[fechas.length - 1], out.length, total]);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+  res.json({ ok: true, filas: out.length, meses, desde: fechas[0], hasta: fechas[fechas.length - 1], total });
+}));
+
+// Cruce: venta real de la base (por marca, para separar Paraíso) vs venta APK, del último mes del año en curso.
+app.get('/api/apk', wrap(auth), wrap(async (req, res) => {
+  const scope = scopeOf(req.user, req.query.acc);
+  const base = await pool.query(`SELECT anio, mes, max(dia) AS dia FROM ${SCHEMA}.ventas_tienda_dia
+    WHERE anio = (SELECT max(anio) FROM ${SCHEMA}.ventas_tienda_dia) GROUP BY anio, mes ORDER BY mes DESC LIMIT 1`);
+  const ultima = await pool.query(`SELECT usuario, archivo, desde, hasta, filas, total::float8 AS total, creado_en FROM ${SCHEMA}.apk_cargas ORDER BY id DESC LIMIT 1`);
+  if (!base.rows.length) return res.json({ periodo: null, ultima: ultima.rows[0] || null, real: [], apk: [] });
+  const { anio, mes } = base.rows[0];
+  const apkMax = await pool.query(`SELECT max(dia) AS dia FROM ${SCHEMA}.apk_ventas WHERE anio = $1 AND mes = $2`, [anio, mes]);
+  const diaBase = base.rows[0].dia, diaApk = apkMax.rows[0].dia;
+  // Se compara hasta el día que tienen ambos (si el APK llega al 20 y la base al 22, se compara del 1 al 20).
+  const dia = diaApk ? Math.min(diaBase, diaApk) : diaBase;
+  const p1 = [anio, mes, dia], p2 = [anio, mes, dia];
+  const c1 = scope == null ? 'true' : scopeSql(scope, p1, true);
+  const c2 = scope == null ? 'true' : scopeSql(scope, p2, true);
+  const [real, apk] = await Promise.all([
+    pool.query(`SELECT cadena, tienda, marca, semana, (array_agg(coordinador ORDER BY dia DESC) FILTER (WHERE coordinador <> ''))[1] AS coordinador, sum(venta)::float8 AS v
+      FROM ${SCHEMA}.ventas_tienda_dia WHERE anio = $1 AND mes = $2 AND dia <= $3 AND ${c1} GROUP BY cadena, tienda, marca, semana`, p1),
+    pool.query(`SELECT coordinador, cadena, tienda, marca, semana, sum(venta)::float8 AS v, sum(unidades)::float8 AS u
+      FROM ${SCHEMA}.apk_ventas WHERE anio = $1 AND mes = $2 AND dia <= $3 AND ${c2} GROUP BY coordinador, cadena, tienda, marca, semana`, p2),
+  ]);
+  const semanas = await pool.query(`SELECT semana, min(dia) AS desde, max(dia) AS hasta FROM ${SCHEMA}.ventas_tienda_dia
+    WHERE anio = $1 AND mes = $2 AND dia <= $3 GROUP BY semana ORDER BY semana`, [anio, mes, dia]);
+  res.set('Cache-Control', 'no-store');
+  res.json({ periodo: { anio, mes, dia, diaBase, diaApk: diaApk || null }, semanas: semanas.rows, ultima: scope == null ? ultima.rows[0] || null : (ultima.rows[0] ? { hasta: ultima.rows[0].hasta, creado_en: ultima.rows[0].creado_en } : null), real: real.rows, apk: apk.rows });
 }));
 
 // Correo de análisis: destinatarios guardados (el correo se envía desde el correo del administrador).

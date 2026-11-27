@@ -42,10 +42,10 @@
     set(k, v) { try { localStorage.setItem('rva:' + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } },
   };
 
-  function toast(msg) {
+  function toast(msg, ms = 2600) {
     const t = $('#toast');
     t.textContent = msg; t.hidden = false;
-    clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), 2600);
+    clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), ms);
   }
 
   // ---------------------------------------------------------------- parseo de valores
@@ -547,10 +547,11 @@
   async function setAcc(key) {
     if (key === state.acc) return;
     state.acc = key; store.set('acc', key);
-    cmp.data = null; cmp.cache = null; cmp.init = false;
+    cmp.data = null; cmp.cache = null; cmp.init = false; apk.data = null;
     renderScope();
     await loadServer();
     if (state.view === 'comparativa') renderCmp();
+    if (state.view === 'apk') apkLoad(true);
   }
 
   let serverData = null, coordData = null;
@@ -1337,6 +1338,267 @@
         api('/api/me').then((r) => { session.user = r.user; store.set('user', r.user); renderSession(); });
       } catch (x) { err.textContent = x.message; }
     });
+  }
+
+  // ---------------------------------------------------------------- Ventas híbridas vs APK
+  // Cruce de la venta Paraíso real (base) con lo registrado por las promotoras en el APK, en el último mes del año en curso.
+  const apk = { data: null, by: 'coordinador', week: '', model: null, loading: null };
+
+  async function apkLoad(force) {
+    if (!session.user) return;
+    if (apk.data && !force) { apkRender(); return; }
+    $('#apkStatus').hidden = false; $('#apkStatus').className = 'apk-status'; $('#apkStatus').textContent = 'Cargando el cruce…';
+    try {
+      apk.data = await api('/api/apk' + accQuery());
+      apk.model = null;
+      apkRender();
+    } catch (e) {
+      $('#apkStatus').className = 'apk-status warn'; $('#apkStatus').textContent = e.message;
+    }
+  }
+
+  // Une cada tienda del APK con su tienda de la base (mismo nombre de cadena y tienda; si no, por el nombre de la tienda).
+  function apkModel() {
+    const D = apk.data;
+    const esPar = (m) => tipoDe(m) === 'paraiso';
+    const K = (c, t) => norm(c) + '|' + norm(t);
+    const stores = new Map();
+    const get = (k, cad, tie) => stores.get(k) || stores.set(k, { k, cadena: cad, tienda: tie, coordBase: '', coordApk: new Map(), real: 0, apk: 0, rw: {}, aw: {} }).get(k);
+    for (const r of D.real) {
+      if (!esPar(r.marca)) continue; // solo Venta Paraíso: la competencia no se registra en el APK
+      const s = get(K(r.cadena, r.tienda), r.cadena, r.tienda);
+      s.real += r.v; s.rw[r.semana] = (s.rw[r.semana] || 0) + r.v;
+      if (r.coordinador) s.coordBase = r.coordinador;
+    }
+    const byT = new Map();
+    for (const s of stores.values()) { const t = norm(s.tienda); (byT.get(t) || byT.set(t, []).get(t)).push(s.k); }
+    const match = (cad, tie) => {
+      const k = K(cad, tie); if (stores.has(k)) return k;
+      const nc = norm(cad), nt = norm(tie), first = nc.split(' ')[0];
+      const bare = nt.replace(/^(tda|tienda|tiend|local|pdv|sucursal|suc|punto de venta)\s+/, '');
+      const cands = [nt, bare, nt.startsWith(nc + ' ') ? nt.slice(nc.length + 1) : null, bare.startsWith(nc + ' ') ? bare.slice(nc.length + 1) : null, nc + ' ' + bare].filter(Boolean);
+      for (const t of cands) {
+        const c = byT.get(t); if (!c) continue;
+        if (c.length === 1) return c[0];
+        const same = c.filter((x) => x.startsWith(first)); if (same.length === 1) return same[0];
+      }
+      return null;
+    };
+    const unmatched = new Map();
+    let apkOtras = 0;
+    for (const r of D.apk) {
+      if (r.marca && !esPar(r.marca)) { apkOtras += r.v; continue; }
+      const k = match(r.cadena, r.tienda);
+      if (!k) {
+        const u = unmatched.get(K(r.cadena, r.tienda)) || unmatched.set(K(r.cadena, r.tienda), { cadena: r.cadena, tienda: r.tienda, coord: r.coordinador, v: 0 }).get(K(r.cadena, r.tienda));
+        u.v += r.v; continue;
+      }
+      const s = stores.get(k);
+      s.apk += r.v; s.aw[r.semana] = (s.aw[r.semana] || 0) + r.v;
+      if (r.coordinador) s.coordApk.set(r.coordinador, (s.coordApk.get(r.coordinador) || 0) + r.v);
+    }
+    for (const s of stores.values()) {
+      const top = [...s.coordApk.entries()].sort((a, b) => b[1] - a[1])[0];
+      s.coord = top ? top[0] : s.coordBase || 'SIN COORDINADOR';
+    }
+    const list = [...stores.values()].filter((s) => s.real || s.apk);
+    return { list, unmatched: [...unmatched.values()].sort((a, b) => b.v - a.v), apkOtras };
+  }
+
+  const capOf = (apkV, real) => (real > 0 ? apkV / real : null);
+  const capCls = (c) => (c == null ? '' : c >= 0.9 ? 'hi' : c >= 0.7 ? 'mid' : 'lo');
+  const capTxt = (c) => (c == null ? '—' : fmtPct.format(c));
+
+  function apkRender() {
+    const D = apk.data;
+    const st = $('#apkStatus');
+    $('#apkUploadBtn').hidden = !perm('subir');
+    if (!D || !D.periodo) {
+      st.hidden = true; $('#apkBody').hidden = true; $('#apkEmpty').hidden = false;
+      $('#apkEmpty').innerHTML = '<h3>Todavía no hay datos de la base</h3><p>Primero hay que subir la venta en la pestaña Datos.</p>';
+      return;
+    }
+    const { anio, mes, dia, diaBase, diaApk } = D.periodo;
+    const MESL = MESES_LARGO[mes - 1];
+    $('#apkSub').textContent = `Venta Paraíso real de la base frente a lo registrado por las promotoras en el APK · ${MESL} ${anio}, del 1 al ${dia}.`;
+    if (!D.apk.length) {
+      st.hidden = true; $('#apkBody').hidden = true; $('#apkEmpty').hidden = false;
+      $('#apkEmpty').innerHTML = `<h3>Falta el archivo del APK de ${MESL.toLowerCase()} ${anio}</h3><p>${perm('subir') ? 'Sube el archivo con las ventas registradas en el APK (fecha, coordinador, cadena, tienda y venta). Se cruzará con la Venta Paraíso real de la base, por coordinador, cadena y tienda, mes y semana.' : 'Cuando se suba el archivo del APK de este mes, aquí verás el cruce con la venta real.'}</p>${perm('subir') ? '<p style="margin-top:14px"><button class="btn btn-primary" type="button" data-apk-upload>Subir archivo del APK</button></p>' : ''}`;
+      $('#apkExport').disabled = true;
+      return;
+    }
+    $('#apkEmpty').hidden = true; $('#apkBody').hidden = false; $('#apkExport').disabled = false;
+    const notes = [];
+    if (diaApk && diaApk < diaBase) notes.push(`El APK llega hasta el ${diaApk} y la base hasta el ${diaBase}: se compara del 1 al ${dia} en ambos.`);
+    if (diaApk && diaApk > diaBase) notes.push(`El APK llega hasta el ${diaApk} y la base hasta el ${diaBase}: se compara del 1 al ${dia} en ambos.`);
+    if (D.ultima?.creado_en) notes.push(`Último archivo del APK cargado el ${new Date(D.ultima.creado_en).toLocaleDateString('es-PE')}${D.ultima.archivo ? ` (${esc(D.ultima.archivo)})` : ''}.`);
+    st.hidden = !notes.length; st.className = 'apk-status'; st.innerHTML = notes.join(' ');
+
+    const M = apk.model || (apk.model = apkModel());
+    const real = M.list.reduce((a, s) => a + s.real, 0), apkV = M.list.reduce((a, s) => a + s.apk, 0);
+    const unm = M.unmatched.reduce((a, s) => a + s.v, 0);
+    const cap = capOf(apkV, real);
+    const sinApk = M.list.filter((s) => s.real > 0 && !s.apk);
+    const cards = [
+      kpi(`Venta Paraíso real · ${MESL} 1–${dia}`, money(real), `${num(M.list.filter((s) => s.real > 0).length)} tiendas con venta`),
+      kpi('Registrado en el APK', money(apkV), `${num(M.list.filter((s) => s.apk > 0).length)} tiendas con registro`),
+      kpi('Captura del APK', `<span class="cap ${capCls(cap)}">${capTxt(cap)}</span>`, 'Venta APK ÷ venta real'),
+      kpi('Venta sin registrar', money(Math.max(0, real - apkV)), real - apkV < 0 ? `El APK registra ${money(apkV - real)} más que la venta real` : sinApk.length ? `${num(sinApk.length)} ${sinApk.length === 1 ? 'tienda' : 'tiendas'} sin ningún registro` : 'Todas las tiendas tienen registro'),
+    ];
+    if (unm > 0) cards.push(kpi('APK que no cruza', money(unm), `${num(M.unmatched.length)} ${M.unmatched.length === 1 ? 'tienda' : 'tiendas'} sin coincidencia en la base`));
+    $('#apkKpis').innerHTML = cards.join('');
+
+    // Semanas
+    const weeks = D.semanas.map((w) => {
+      const r = M.list.reduce((a, s) => a + (s.rw[w.semana] || 0), 0), a2 = M.list.reduce((a, s) => a + (s.aw[w.semana] || 0), 0);
+      return { ...w, real: r, apk: a2, cap: capOf(a2, r) };
+    });
+    $('#apkWeekNote').textContent = `Semanas de lunes a domingo dentro de ${MESL.toLowerCase()}.`;
+    $('#tblApkWeeks').innerHTML = `<thead><tr><th>Semana</th><th>Días</th><th class="num">Venta real</th><th class="num">APK</th><th class="num">Captura</th><th class="num">Sin registrar</th></tr></thead><tbody>${weeks.map((w) => `<tr><td>Semana ${w.semana}</td><td>${w.desde}–${w.hasta} ${MESES[mes - 1]}</td><td class="num">${money(w.real)}</td><td class="num">${money(w.apk)}</td><td class="num"><span class="cap ${capCls(w.cap)}">${capTxt(w.cap)}</span></td><td class="num">${money(w.real - w.apk)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Mes</td><td>1–${dia} ${MESES[mes - 1]}</td><td class="num">${money(real)}</td><td class="num">${money(apkV)}</td><td class="num"><span class="cap ${capCls(cap)}">${capTxt(cap)}</span></td><td class="num">${money(real - apkV)}</td></tr></tfoot>`;
+    state.charts.apkWeeks?.destroy();
+    if (window.Chart) {
+      state.charts.apkWeeks = new Chart($('#chApkWeeks'), {
+        type: 'bar',
+        data: { labels: weeks.map((w) => 'Sem ' + w.semana), datasets: [
+          { label: 'Venta real', data: weeks.map((w) => w.real), backgroundColor: '#2F5BEA', borderRadius: 4, barPercentage: .8, categoryPercentage: .7 },
+          { label: 'APK', data: weeks.map((w) => w.apk), backgroundColor: '#FF8A3D', borderRadius: 4, barPercentage: .8, categoryPercentage: .7 },
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, animation: $('#view-apk').classList.contains('active') ? undefined : false,
+          plugins: { legend: { position: 'top', align: 'end' }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${money(c.raw)}`, afterBody: (items) => { const w = weeks[items[0].dataIndex]; return `Captura: ${capTxt(w.cap)}`; } } } },
+          scales: { y: { beginAtZero: true, ticks: { callback: moneyTick }, grid: { color: '#EEF0F6' } }, x: { grid: { display: false } } } },
+      });
+    }
+
+    // Selector de semana para la tabla
+    const sel = $('#apkWeek');
+    const keepW = weeks.some((w) => String(w.semana) === apk.week) ? apk.week : String(weeks[weeks.length - 1]?.semana || '');
+    sel.innerHTML = weeks.map((w) => `<option value="${w.semana}">Semana ${w.semana} (${w.desde}–${w.hasta} ${MESES[mes - 1]})</option>`).join('');
+    sel.value = keepW; apk.week = keepW;
+    apkTable();
+
+    // Sin cruce / sin APK
+    $('#apkUnmatchedBox').hidden = !M.unmatched.length;
+    $('#apkUnmatchedSum').textContent = `Tiendas del APK que no cruzan con la base (${num(M.unmatched.length)} · ${money(unm)})`;
+    $('#tblApkUnmatched').innerHTML = `<thead><tr><th>Cadena</th><th>Tienda (como viene en el APK)</th><th>Coordinador</th><th class="num">Venta APK</th></tr></thead><tbody>${M.unmatched.map((u) => `<tr><td>${esc(u.cadena)}</td><td>${esc(u.tienda)}</td><td>${esc(u.coord || '—')}</td><td class="num">${money(u.v)}</td></tr>`).join('')}</tbody>`;
+    const sa = [...sinApk].sort((a, b) => b.real - a.real);
+    $('#apkNoApkSum').textContent = `Tiendas con venta Paraíso real y sin registro en el APK (${num(sa.length)} · ${money(sa.reduce((a, s) => a + s.real, 0))})`;
+    $('#tblApkNoApk').innerHTML = `<thead><tr><th>Coordinador</th><th>Cadena</th><th>Tienda</th><th class="num">Venta real</th></tr></thead><tbody>${sa.map((s) => `<tr><td>${esc(s.coord)}</td><td>${esc(s.cadena)}</td><td>${esc(s.tienda)}</td><td class="num">${money(s.real)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Todas las tiendas con venta tienen registro en el APK.</td></tr>'}</tbody>`;
+  }
+
+  function apkGroups() {
+    const M = apk.model, w = +apk.week, by = apk.by;
+    const g = new Map();
+    for (const s of M.list) {
+      const key = by === 'coordinador' ? s.coord : by === 'cadena' ? s.cadena : s.k;
+      const o = g.get(key) || g.set(key, { name: by === 'coordinador' ? s.coord : by === 'cadena' ? s.cadena : s.tienda, cadena: s.cadena, coord: s.coord, n: 0, real: 0, apk: 0, wr: 0, wa: 0 }).get(key);
+      o.n++; o.real += s.real; o.apk += s.apk; o.wr += s.rw[w] || 0; o.wa += s.aw[w] || 0;
+    }
+    return [...g.values()].sort((a, b) => b.real - a.real);
+  }
+
+  function apkTable() {
+    if (!apk.model) return;
+    const rows = apkGroups(), q = norm($('#apkSearch').value);
+    const by = apk.by, w = apk.week;
+    const shown = q ? rows.filter((r) => norm(`${r.name} ${r.cadena} ${r.coord}`).includes(q)) : rows;
+    const first = by === 'tienda' ? '<th>Tienda</th><th>Cadena</th><th>Coordinador</th>' : by === 'cadena' ? '<th>Cadena</th><th class="num">Tiendas</th>' : '<th>Coordinador</th><th class="num">Tiendas</th>';
+    const nFirst = by === 'tienda' ? 3 : 2;
+    const tr = (r, foot) => `<tr>${by === 'tienda' ? `<td>${esc(r.name)}</td><td>${esc(r.cadena)}</td><td>${esc(r.coord)}</td>` : `<td>${esc(r.name)}</td><td class="num">${num(r.n)}</td>`}
+      <td class="num sep">${money(r.real)}</td><td class="num">${money(r.apk)}</td><td class="num"><span class="cap ${capCls(capOf(r.apk, r.real))}">${capTxt(capOf(r.apk, r.real))}</span></td><td class="num">${money(r.real - r.apk)}</td>
+      <td class="num sep">${money(r.wr)}</td><td class="num">${money(r.wa)}</td><td class="num"><span class="cap ${capCls(capOf(r.wa, r.wr))}">${capTxt(capOf(r.wa, r.wr))}</span></td></tr>`;
+    const tot = shown.reduce((a, r) => ({ name: 'Total', cadena: '', coord: '', n: a.n + r.n, real: a.real + r.real, apk: a.apk + r.apk, wr: a.wr + r.wr, wa: a.wa + r.wa }), { n: 0, real: 0, apk: 0, wr: 0, wa: 0 });
+    const D = apk.data.periodo;
+    $('#tblApk').innerHTML = `<thead><tr><th colspan="${nFirst}"></th><th colspan="4" class="grp">${MESES_LARGO[D.mes - 1]} 1–${D.dia}</th><th colspan="3" class="grp">Semana ${w}</th></tr>
+      <tr>${first}<th class="num">Venta real</th><th class="num">APK</th><th class="num">Captura</th><th class="num">Sin registrar</th><th class="num">Venta real</th><th class="num">APK</th><th class="num">Captura</th></tr></thead>
+      <tbody>${shown.map((r) => tr(r)).join('') || `<tr><td colspan="${nFirst + 7}" class="muted">Sin resultados.</td></tr>`}</tbody>
+      <tfoot>${by === 'tienda' ? tr({ ...tot, name: 'Total', cadena: '', coord: '' }).replace('<td></td><td></td>', '<td></td><td></td>') : tr(tot)}</tfoot>`;
+  }
+
+  // Excel con el mismo formato del reporte
+  function apkSheets() {
+    if (!apk.model) return [];
+    const D = apk.data.periodo, M = apk.model, w = +apk.week;
+    const per = `${MESES_LARGO[D.mes - 1]} ${D.anio}, del 1 al ${D.dia}`;
+    const mk = (by) => { const prev = apk.by; apk.by = by; const r = apkGroups(); apk.by = prev; return r; };
+    const T = (by, first, firstVals) => ({ head: [...first, 'Venta real (mes)', 'APK (mes)', 'Captura (mes)', 'Sin registrar (mes)', `Venta real (sem ${w})`, `APK (sem ${w})`, `Captura (sem ${w})`],
+      rows: mk(by).map((r) => [...firstVals(r), r.real, r.apk, capOf(r.apk, r.real), r.real - r.apk, r.wr, r.wa, capOf(r.wa, r.wr)]), foot: [],
+      types: [...first.map(() => 't'), '$', '$', 'p', '$', '$', '$', 'p'] });
+    const weeks = apk.data.semanas.map((x) => { const r = M.list.reduce((a, s) => a + (s.rw[x.semana] || 0), 0), a2 = M.list.reduce((a, s) => a + (s.aw[x.semana] || 0), 0); return [`Semana ${x.semana}`, `${x.desde}–${x.hasta}`, r, a2, capOf(a2, r), r - a2]; });
+    return [
+      { name: 'Semanas', title: `Venta Paraíso real vs APK por semana · ${per}`, T: { head: ['Semana', 'Días', 'Venta real', 'APK', 'Captura', 'Sin registrar'], rows: weeks, foot: [], types: ['t', 't', '$', '$', 'p', '$'] } },
+      { name: 'Coordinadores', title: `Por coordinador · ${per}`, T: T('coordinador', ['Coordinador', 'Tiendas'], (r) => [r.name, r.n]) },
+      { name: 'Cadenas', title: `Por cadena · ${per}`, T: T('cadena', ['Cadena', 'Tiendas'], (r) => [r.name, r.n]) },
+      { name: 'Tiendas', title: `Por tienda · ${per}`, T: T('tienda', ['Tienda', 'Cadena', 'Coordinador'], (r) => [r.name, r.cadena, r.coord]) },
+      { name: 'APK sin cruce', title: 'Tiendas del APK que no cruzan con la base', T: { head: ['Cadena', 'Tienda', 'Coordinador', 'Venta APK'], rows: M.unmatched.map((u) => [u.cadena, u.tienda, u.coord, u.v]), foot: [], types: ['t', 't', 't', '$'] } },
+    ];
+  }
+
+  // ---- subida del archivo del APK
+  async function apkUpload(file) {
+    try {
+      toast('Leyendo el archivo del APK…');
+      const wb = await readFile(file);
+      const agg = new Map();
+      let usadas = 0, sinFecha = 0, otras = 0, hojas = 0;
+      const faltan = new Set();
+      for (const name of wb.SheetNames) {
+        const rows = sheetRows(wb, name);
+        if (rows.length < 2) continue;
+        const h = detectHeaderRow(rows);
+        const headers = (rows[h] || []).map((x) => (x == null ? '' : String(x)));
+        const data = rows.slice(h + 1);
+        const map = detectMapping(headers, data);
+        const need = { venta: 'venta', fecha: 'fecha', cadena: 'cadena', tienda: 'tienda' };
+        const miss = Object.keys(need).filter((k) => map[k] == null);
+        if (miss.length) { miss.forEach((k) => faltan.add(k)); continue; }
+        hojas++;
+        for (const r of data) {
+          const v = parseAmount(r?.[map.venta]);
+          if (!v) continue;
+          const f = parseYM(r[map.fecha]);
+          if (!f || !f.d) { sinFecha++; continue; }
+          const marca = map.marca != null ? String(r[map.marca] ?? '').trim() : '';
+          if (marca && tipoDe(marca) !== 'paraiso') { otras++; continue; }
+          const fecha = `${f.y}-${String(f.m).padStart(2, '0')}-${String(f.d).padStart(2, '0')}`;
+          const coord = map.coordinador != null ? String(r[map.coordinador] ?? '').trim() : '';
+          const cad = String(r[map.cadena] ?? '').trim(), tie = String(r[map.tienda] ?? '').trim();
+          if (!cad || !tie) continue;
+          const u = map.unidades != null ? parseAmount(r[map.unidades]) || 0 : 0;
+          const k = [fecha, coord.toUpperCase(), cad.toUpperCase(), tie.toUpperCase(), marca.toUpperCase()].join('\u0001');
+          const o = agg.get(k) || agg.set(k, [fecha, coord, cad, tie, marca, 0, 0]).get(k);
+          o[5] += v; o[6] += u; usadas++;
+        }
+      }
+      if (!hojas) {
+        const nom = { venta: 'venta', fecha: 'fecha', cadena: 'cadena', tienda: 'tienda' };
+        return toast(`No encontré en el archivo las columnas de ${[...faltan].map((k) => nom[k]).join(', ')}. El archivo del APK necesita fecha, cadena, tienda y venta (y de preferencia coordinador).`, 9000);
+      }
+      const rows = [...agg.values()];
+      if (!rows.length) return toast('El archivo no trae filas con venta y fecha.', 7000);
+      const fechas = rows.map((r) => r[0]).sort();
+      const total = rows.reduce((a, r) => a + r[5], 0);
+      const meses = [...new Set(rows.map((r) => r[0].slice(0, 7)))].map((x) => { const [y, m] = x.split('-'); return `${MESES_LARGO[+m - 1].toLowerCase()} ${y}`; });
+      const coords = new Set(rows.map((r) => r[1]).filter(Boolean)).size, tiendas = new Set(rows.map((r) => r[2] + '|' + r[3])).size;
+      const msg = `Archivo: ${file.name}\n\n${num(usadas)} filas con venta · del ${fechas[0].split('-').reverse().join('/')} al ${fechas[fechas.length - 1].split('-').reverse().join('/')}\nVenta APK: ${money(total)}\n${num(tiendas)} tiendas · ${num(coords)} coordinadores${otras ? `\n${num(otras)} filas de otras marcas (no Paraíso) se dejaron fuera.` : ''}${sinFecha ? `\n${num(sinFecha)} filas sin fecha válida se dejaron fuera.` : ''}\n\nSe reemplazará lo que haya del APK en: ${meses.join(', ')}.\n¿Guardar?`;
+      if (!confirm(msg)) return;
+      toast('Guardando el archivo del APK…');
+      const r = await api('/api/apk', { method: 'POST', body: { archivo: file.name, rows } });
+      toast(`Listo: ${num(r.filas)} registros del APK guardados.`);
+      await apkLoad(true);
+    } catch (e) { toast(e.message, 8000); }
+  }
+
+  function initApk() {
+    $('#apkUploadBtn').addEventListener('click', () => $('#apkFile').click());
+    $('#apkEmpty').addEventListener('click', (e) => { if (e.target.closest('[data-apk-upload]')) $('#apkFile').click(); });
+    $('#apkFile').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) apkUpload(f); });
+    $('#apkBy').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-by]'); if (!b) return;
+      apk.by = b.dataset.by; $$('#apkBy [data-by]').forEach((x) => x.classList.toggle('on', x === b)); apkTable();
+    });
+    $('#apkWeek').addEventListener('change', (e) => { apk.week = e.target.value; apkTable(); });
+    $('#apkSearch').addEventListener('input', apkTable);
+    $('#apkExport').addEventListener('click', () => exportXlsxStyled().catch((e) => toast(e.message)));
   }
 
   // ---------------------------------------------------------------- análisis y correo (administración)
@@ -2651,7 +2913,7 @@
   const loadScript = (src) => loaded[src] || (loaded[src] = new Promise((ok, fail) => {
     const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => fail(new Error('No se pudo cargar ' + src)); document.head.appendChild(el);
   }));
-  const VIEW_NAME = { resumen: 'Resumen', comparativa: 'Comparativa', anual: 'Por año', datos: 'Datos', admin: 'Administración' };
+  const VIEW_NAME = { resumen: 'Resumen', comparativa: 'Comparativa', anual: 'Por año', datos: 'Datos', admin: 'Administración', apk: 'Híbridas vs APK' };
   const stamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   // Texto del corte y filtros para encabezados de descargas.
   function cutLine(short) {
@@ -2689,6 +2951,7 @@
       if (F.showShare) out.push({ name: 'Paraíso vs Competencia', title: 'Paraíso vs Competencia por año', T: groupsAOA(F, R) });
       return out;
     }
+    if (v === 'apk') return apkSheets();
     if (v === 'comparativa' && cmp.last) {
       const hasU = cmp.last.list.some((g) => g.uA || g.uB);
       const out = [];
@@ -2856,9 +3119,10 @@
     state.view = v;
     $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === v));
     $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
-    $('#analysis').hidden = v === 'datos' || v === 'admin';
+    $('#analysis').hidden = v === 'datos' || v === 'admin' || v === 'apk';
     $$('[data-analysis]').forEach((s) => s.toggleAttribute('data-off', !state.records.length));
     if (v === 'comparativa') renderCmp();
+    if (v === 'apk') apkLoad();
     if (v === 'admin') { loadAdmin(); if (!$('#adminCorreo').hidden) openMail(); }
     requestAnimationFrame(() => requestAnimationFrame(() => Object.values(state.charts).forEach((c) => c.resize())));
     window.scrollTo({ top: 0 });
@@ -3008,6 +3272,7 @@
     });
     initAdmin();
     initMail();
+    initApk();
   }
 
   // Exponer funciones de parseo para pruebas automáticas.
